@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch global (Script long > 1 min + TTS Gemini Bodi ultra-robuste + Sous-titres Montserrat)
+      - name: Patch global (Script long > 1 min + TTS Gemini Bodi avec conversion PCM propre + Montserrat)
         run: |
           cat << 'EOF' > patch_all.py
           import os
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch TTS avec gestion blindée des types d'arguments (évite le crash float)
+          # 2. Patch TTS avec conversion de l'audio brut PCM vers MP3 via FFmpeg
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -88,12 +88,11 @@ jobs:
           def azure_tts_v1(*args, **kwargs):
               from google import genai
               from google.genai import types
-              import base64, os
+              import base64, os, subprocess
               
               text = ""
               tts_file = "output.mp3"
               
-              # Filtrage intelligent des arguments positionnels selon leur type
               for arg in args:
                   if isinstance(arg, str):
                       if arg.endswith(".mp3") or "/" in arg or "\\\\" in arg:
@@ -128,8 +127,22 @@ jobs:
                       if part.inline_data and part.inline_data.data:
                           audio_bytes = base64.b64decode(part.inline_data.data)
                           os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
-                          with open(tts_file, "wb") as f:
+                          
+                          # Enregistrement brut PCM temporaire
+                          pcm_file = tts_file.replace('.mp3', '.pcm')
+                          with open(pcm_file, "wb") as f:
                               f.write(audio_bytes)
+                          
+                          # Conversion propre du PCM vers MP3 via FFmpeg
+                          cmd = [
+                              "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
+                              "-i", pcm_file, tts_file
+                          ]
+                          subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                          
+                          if os.path.exists(pcm_file):
+                              os.remove(pcm_file)
+                              
                           return True
               except Exception as e:
                   print(f"Gemini 3.8 Flash TTS SDK Error: {e}")
@@ -157,7 +170,7 @@ jobs:
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH TTS BLINDÉ APPLIQUÉ.')
+          print('PATCH AUDIO PCM -> MP3 APPLIQUÉ.')
           EOF
           python patch_all.py
 
