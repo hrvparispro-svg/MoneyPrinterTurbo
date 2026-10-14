@@ -16,10 +16,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installation de FFmpeg
+      - name: Installation de FFmpeg et ImageMagick (requis pour les sous-titres)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg imagemagick
 
       - name: Installation des dépendances et du SDK Google
         run: |
@@ -27,22 +27,25 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai
 
-      - name: Patch de llm.py (Script 100% texte pur)
+      - name: Patch global (Script long > 1 min + TTS Gemini 3.8 Flash 'Bodi')
         run: |
-          cat << 'EOF' > patch_llm.py
-          filepath = 'app/services/llm.py'
-          with open(filepath, 'r', encoding='utf-8') as f:
-              code = f.read()
+          cat << 'EOF' > patch_all.py
+          import os
+
+          # 1. Patch de llm.py pour un script long (> 60s)
+          llm_path = 'app/services/llm.py'
+          with open(llm_path, 'r', encoding='utf-8') as f:
+              llm_code = f.read()
 
           target_script = 'def generate_script('
           new_script = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
               from google import genai
-              import os, time
+              import time
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
               
-              prompt = f"Tu es un expert TikTok. Rédige un script de voix off court, percutant et engageant en {language} sur le sujet suivant : '{video_subject}'. Écris UNIQUEMENT le texte de la voix off, sans aucune balise, sans JSON, sans guillemets, sans titre."
+              prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets."
               
               res = None
               for attempt in range(3):
@@ -53,15 +56,14 @@ jobs:
                       time.sleep(3)
               
               if res and res.text:
-                  clean_text = res.text.strip().replace('```', '')
-                  return clean_text
+                  return res.text.strip().replace('```', '')
 
-              return "Le stress au travail peut impacter votre santé mentale. Pour vous protéger, posez des limites claires, pratiquez la respiration profonde et faites des pauses régulières. Prenez soin de votre bien-être au quotidien sur hrv-paris.com."
+              return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
 
           def _disabled_generate_script('''
 
-          if target_script in code:
-              code = code.replace(target_script, new_script, 1)
+          if target_script in llm_code:
+              llm_code = llm_code.replace(target_script, new_script, 1)
 
           target_terms = 'def generate_terms('
           new_terms = '''def generate_terms(video_subject, paragraph_number=1, language="fr", **kwargs):
@@ -69,16 +71,50 @@ jobs:
 
           def _disabled_generate_terms('''
 
-          if target_terms in code:
-              code = code.replace(target_terms, new_terms, 1)
+          if target_terms in llm_code:
+              llm_code = llm_code.replace(target_terms, new_terms, 1)
 
-          with open(filepath, 'w', encoding='utf-8') as f:
-              f.write(code)
-          print('PATCH TEXTE PUR APPLIQUÉ.')
+          with open(llm_path, 'w', encoding='utf-8') as f:
+              f.write(llm_code)
+
+
+          # 2. Patch de tts.py pour utiliser Gemini 3.8 Flash TTS (Voix Bodi)
+          tts_path = 'app/services/tts.py'
+          if os.path.exists(tts_path):
+              with open(tts_path, 'r', encoding='utf-8') as f:
+                  tts_code = f.read()
+              
+              # Ajout d'un wrapper TTS personnalisé
+              custom_tts = '''
+          def text_to_speech(text, voice_name="Bodi", tts_file="output.mp3", **kwargs):
+              from google import genai
+              import base64
+              api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
+              
+              interaction = client.interactions.create(
+                  model="gemini-3.8-flash-tts",
+                  input=[{
+                      "type": "user_input",
+                      "content": [{"type": "text", "text": text}],
+                  }],
+                  response_format={"type": "audio"},
+                  generation_config={"speech_config": [{"voice": "Bodi"}]},
+              )
+              audio_bytes = base64.b64decode(interaction.output_audio.data)
+              with open(tts_file, "wb") as f:
+                  f.write(audio_bytes)
+              return tts_file
+              '''
+              tts_code += "\n" + custom_tts
+              with open(tts_path, 'w', encoding='utf-8') as f:
+                  f.write(tts_code)
+
+          print('PATCH GLOBAL RÉUSSI (Script > 1 min + Voix Bodi Gemini).')
           EOF
-          python patch_llm.py
+          python patch_all.py
 
-      - name: Création du fichier config.toml
+      - name: Création du fichier config.toml (Sous-titres activés)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -95,14 +131,19 @@ jobs:
           pexels_api_keys = ["{p_key}"]
           output_dir = "./storage/output"
           subtitle_provider = "edge"
+
+          [video]
+          voice_name = "Bodi"
+          video_volume = 0.0
+          subtitle_enabled = true
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Config générée.')
+          print('Config.toml générée.')
           EOF
           python make_config.py
 
-      - name: Lancer la génération avec Voix Homme Mûre et Sous-titres forcés
+      - name: Lancer la génération de la vidéo longue (> 1 min)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -110,7 +151,7 @@ jobs:
           python cli.py \
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
             --video-lang "fr" \
-            --voice-name "fr-FR-HenriNeural" \
+            --voice-name "Bodi" \
             --subtitle-enabled
 
       - name: Sauvegarder UNIQUEMENT la vidéo finale MP4
