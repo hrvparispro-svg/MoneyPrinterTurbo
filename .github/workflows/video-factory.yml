@@ -135,13 +135,12 @@ jobs:
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          # 3. Optimisation de Whisper pour afficher les sous-titres mot par mot
+          # 3. Optimisation de Whisper pour afficher les sous-titres mot par mot (max 2 mots par ligne)
           subtitle_path = 'app/services/subtitle.py'
           if os.path.exists(subtitle_path):
               with open(subtitle_path, 'r', encoding='utf-8') as f:
                   sub_code = f.read()
               
-              # Force max_words_per_line = 2 dans Whisper
               sub_code = sub_code.replace('word_timestamps=True', 'word_timestamps=True, max_words_per_line=2')
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
@@ -189,4 +188,12 @@ jobs:
         run: |
           python cli.py \
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
-            --video-lang "
+            --video-lang "fr" \
+            --voice-name "Bodi" \
+            --subtitle-enabled
+
+      - name: Sauvegarder la vidéo finale MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-finale-hrv
+          path: ./storage/tasks/**/final-*.mp4
