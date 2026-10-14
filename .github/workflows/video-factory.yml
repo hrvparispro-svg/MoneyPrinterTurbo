@@ -16,23 +16,26 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installation de FFmpeg, ImageMagick et dépendances système
+      - name: Installation de FFmpeg, ImageMagick et polices
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg imagemagick
+          sudo apt-get install -y ffmpeg imagemagick fonts-montserrat
 
-      - name: Installation des dépendances Python (SDK Google & Whisper)
+      - name: Installation des dépendances Python (Whisper & Requests)
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-genai openai-whisper
+          pip install google-genai openai-whisper requests
 
-      - name: Patch de llm.py pour un script long (> 1 minute) et texte 100% pur
+      - name: Patch global (Script long > 1 min + TTS Gemini Bodi + Sous-titres mot par mot Montserrat)
         run: |
-          cat << 'EOF' > patch_llm.py
-          filepath = 'app/services/llm.py'
-          with open(filepath, 'r', encoding='utf-8') as f:
-              code = f.read()
+          cat << 'EOF' > patch_all.py
+          import os, re
+
+          # 1. Script de voix off long (> 1 min)
+          llm_path = 'app/services/llm.py'
+          with open(llm_path, 'r', encoding='utf-8') as f:
+              llm_code = f.read()
 
           target_script = 'def generate_script('
           new_script = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
@@ -42,7 +45,7 @@ jobs:
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
               
-              prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets, sans titre."
+              prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets."
               
               res = None
               for attempt in range(3):
@@ -59,8 +62,8 @@ jobs:
 
           def _disabled_generate_script('''
 
-          if target_script in code:
-              code = code.replace(target_script, new_script, 1)
+          if target_script in llm_code:
+              llm_code = llm_code.replace(target_script, new_script, 1)
 
           target_terms = 'def generate_terms('
           new_terms = '''def generate_terms(video_subject, paragraph_number=1, language="fr", **kwargs):
@@ -68,16 +71,86 @@ jobs:
 
           def _disabled_generate_terms('''
 
-          if target_terms in code:
-              code = code.replace(target_terms, new_terms, 1)
+          if target_terms in llm_code:
+              llm_code = llm_code.replace(target_terms, new_terms, 1)
 
-          with open(filepath, 'w', encoding='utf-8') as f:
-              f.write(code)
-          print('PATCH SCRIPT LONG APPLIQUÉ.')
+          with open(llm_path, 'w', encoding='utf-8') as f:
+              f.write(llm_code)
+
+
+          # 2. Remplacement du TTS par l'API REST Directe Gemini 3.8 Flash TTS (Voix Bodi)
+          voice_path = 'app/services/voice.py'
+          if os.path.exists(voice_path):
+              with open(voice_path, 'r', encoding='utf-8') as f:
+                  voice_code = f.read()
+
+              gemini_tts_override = '''
+          def azure_tts_v1(*args, **kwargs):
+              import requests, json, base64, os
+              text = args[0] if len(args) > 0 else kwargs.get('text', '')
+              tts_file = args[2] if len(args) > 2 else kwargs.get('tts_file', 'output.mp3')
+              if not tts_file: tts_file = 'output.mp3'
+              
+              api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+              url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=){api_key}"
+              
+              payload = {
+                  "contents": [{"parts": [{"text": text}]}],
+                  "generationConfig": {
+                      "responseModalities": ["AUDIO"],
+                      "speechConfig": {
+                          "voiceConfig": {
+                              "prebuiltVoiceConfig": {
+                                  "voiceName": "Bodi"
+                              }
+                          }
+                      }
+                  }
+              }
+              
+              headers = {"Content-Type": "application/json"}
+              res = requests.post(url, json=payload, headers=headers)
+              
+              if res.status_code == 200:
+                  data = res.json()
+                  try:
+                      audio_b64 = data['candidates'][0]['content']['parts'][0]['inlineData']['data']
+                      with open(tts_file, 'wb') as f:
+                          f.write(base64.b64decode(audio_b64))
+                      return True
+                  except Exception as e:
+                      print(f"Error parsing Gemini TTS response: {e}")
+              else:
+                  print(f"Gemini TTS direct API Error ({res.status_code}): {res.text}")
+              return False
+
+          def _disabled_azure_tts_v1(
+              '''
+
+              if 'def azure_tts_v1(' in voice_code:
+                  voice_code = voice_code.replace('def azure_tts_v1(', gemini_tts_override, 1)
+              else:
+                  voice_code += "\n" + gemini_tts_override
+
+              with open(voice_path, 'w', encoding='utf-8') as f:
+                  f.write(voice_code)
+
+          # 3. Optimisation de Whisper pour afficher les sous-titres mot par mot
+          subtitle_path = 'app/services/subtitle.py'
+          if os.path.exists(subtitle_path):
+              with open(subtitle_path, 'r', encoding='utf-8') as f:
+                  sub_code = f.read()
+              
+              # Force max_words_per_line = 2 dans Whisper
+              sub_code = sub_code.replace('word_timestamps=True', 'word_timestamps=True, max_words_per_line=2')
+              with open(subtitle_path, 'w', encoding='utf-8') as f:
+                  f.write(sub_code)
+
+          print('PATCH GEMINI TTS (BODI) + WHISPER WORD-BY-WORD APPLIQUÉ.')
           EOF
-          python patch_llm.py
+          python patch_all.py
 
-      - name: Création du fichier config.toml (Voix Homme Mûr & Sous-titres Whisper)
+      - name: Création du fichier config.toml (Police Montserrat & Whisper mot par mot)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -96,29 +169,24 @@ jobs:
           subtitle_provider = "whisper"
 
           [video]
-          voice_name = "fr-FR-HenriNeural"
+          voice_name = "Bodi"
           video_volume = 0.0
           subtitle_enabled = true
+          font_name = "Montserrat-Bold"
+          text_fore_color = "#FFFFFF"
+          font_size = 60
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Config.toml générée avec succès.')
+          print('Config.toml générée.')
           EOF
           python make_config.py
 
-      - name: Lancer la génération de la vidéo (> 1 min avec sous-titres Whisper)
+      - name: Lancer la génération de la vidéo (> 1 min, Voix Bodi & Sous-titres dynamiques Montserrat)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
           python cli.py \
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
-            --video-lang "fr" \
-            --voice-name "fr-FR-HenriNeural" \
-            --subtitle-enabled
-
-      - name: Sauvegarder la vidéo finale MP4
-        uses: actions/upload-artifact@v4
-        with:
-          name: video-finale-hrv
-          path: ./storage/tasks/**/final-*.mp4
+            --video-lang "
