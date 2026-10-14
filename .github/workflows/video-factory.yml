@@ -21,11 +21,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Installation des dépendances et mise à jour Gemini SDK
+      - name: Installation des dépendances
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install --upgrade google-generativeai
+
+      - name: Patch du code source (Mise à niveau Gemini API)
+        run: |
+          python -c "
+          with open('app/services/llm.py', 'r', encoding='utf-8') as f:
+              code = f.read()
+          # Correction de l'endpoint API v1beta vers v1 et du nom de modèle
+          code = code.replace('v1beta', 'v1')
+          with open('app/services/llm.py', 'w', encoding='utf-8') as f:
+              f.write(code)
+          print('Patch llm.py appliqué avec succès.')
+          "
 
       - name: Création sécurisée du fichier config.toml
         env:
@@ -47,7 +59,6 @@ jobs:
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Fichier config.toml généré avec succès.')
           "
 
       - name: Lancer la génération de la vidéo
