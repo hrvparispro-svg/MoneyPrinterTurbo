@@ -21,13 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
 
-      - name: Installation des dépendances Python (SDK Google & Whisper pour les sous-titres)
+      - name: Installation des dépendances Python (SDK Google & Whisper)
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch global (Script long > 1 min + Remplacement TTS par Gemini Bodi)
+      - name: Patch global robuste (Script long > 1 min + TTS Gemini Bodi avec *args)
         run: |
           cat << 'EOF' > patch_all.py
           import os
@@ -78,17 +78,23 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch de voice.py pour intercepter Azure/Edge et utiliser Gemini 3.8 Flash TTS (Voix Bodi)
+          # 2. Patch robuste de voice.py avec support flexible des arguments (*args, **kwargs)
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
                   voice_code = f.read()
 
               gemini_tts_override = '''
-          def azure_tts_v1(text, voice_name="Bodi", tts_file="output.mp3", **kwargs):
+          def azure_tts_v1(*args, **kwargs):
               from google import genai
               from google.genai import types
-              import base64
+              import base64, os
+              
+              # Récupération robuste du texte et du fichier de sortie
+              text = args[0] if len(args) > 0 else kwargs.get('text', '')
+              tts_file = args[2] if len(args) > 2 else kwargs.get('tts_file', 'output.mp3')
+              if not tts_file:
+                  tts_file = 'output.mp3'
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
@@ -134,7 +140,6 @@ jobs:
           def _disabled_azure_tts_v1(
               '''
 
-              # Remplacement de azure_tts_v1 dans voice.py
               if 'def azure_tts_v1(' in voice_code:
                   voice_code = voice_code.replace('def azure_tts_v1(', gemini_tts_override, 1)
               else:
@@ -143,11 +148,11 @@ jobs:
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          print('PATCH GLOBAL GEMINI TTS (BODI) + SCRIPT LONG APPLIQUÉ.')
+          print('PATCH ROBUSTE APPLIQUÉ AVEC SUCCÈS.')
           EOF
           python patch_all.py
 
-      - name: Création du fichier config.toml (Whisper pour sous-titres & Voix Bodi)
+      - name: Création du fichier config.toml
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -176,7 +181,7 @@ jobs:
           EOF
           python make_config.py
 
-      - name: Lancer la génération de la vidéo (> 1 min, Voix Bodi & Sous-titres Whisper)
+      - name: Lancer la génération de la vidéo
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
