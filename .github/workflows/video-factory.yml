@@ -27,12 +27,12 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch global (Script long > 1 min + TTS Gemini v1beta 'Bodi' + Sous-titres Montserrat mot par mot)
+      - name: Patch global (Script long > 1 min + TTS Gemini Bodi ultra-robuste + Sous-titres Montserrat)
         run: |
           cat << 'EOF' > patch_all.py
           import os
 
-          # 1. Patch LLM pour un script détaillé de 160-200 mots (> 1 minute) et texte 100% pur
+          # 1. Patch LLM pour un script détaillé de 160-200 mots (> 1 minute)
           llm_path = 'app/services/llm.py'
           with open(llm_path, 'r', encoding='utf-8') as f:
               llm_code = f.read()
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch TTS natif via SDK officiel pointant sur le modèle v1beta (Voix Bodi)
+          # 2. Patch TTS avec gestion blindée des types d'arguments (évite le crash float)
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -90,9 +90,21 @@ jobs:
               from google.genai import types
               import base64, os
               
-              text = args[0] if len(args) > 0 else kwargs.get('text', '')
-              tts_file = args[2] if len(args) > 2 else kwargs.get('tts_file', 'output.mp3')
-              if not tts_file: tts_file = 'output.mp3'
+              text = ""
+              tts_file = "output.mp3"
+              
+              # Filtrage intelligent des arguments positionnels selon leur type
+              for arg in args:
+                  if isinstance(arg, str):
+                      if arg.endswith(".mp3") or "/" in arg or "\\\\" in arg:
+                          tts_file = arg
+                      elif not text:
+                          text = arg
+              
+              if not text:
+                  text = kwargs.get("text", "Texte par défaut")
+              if "tts_file" in kwargs and isinstance(kwargs["tts_file"], str):
+                  tts_file = kwargs["tts_file"]
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
@@ -115,6 +127,7 @@ jobs:
                   for part in response.candidates[0].content.parts:
                       if part.inline_data and part.inline_data.data:
                           audio_bytes = base64.b64decode(part.inline_data.data)
+                          os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
                           with open(tts_file, "wb") as f:
                               f.write(audio_bytes)
                           return True
@@ -144,7 +157,7 @@ jobs:
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH V1BETA GEMINI TTS + MONTSERRAT APPLIQUÉ.')
+          print('PATCH TTS BLINDÉ APPLIQUÉ.')
           EOF
           python patch_all.py
 
