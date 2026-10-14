@@ -37,10 +37,14 @@ jobs:
           target = 'def generate_script('
           new_func = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
               from google import genai
+              from google.genai import types
               import os, json
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              client = genai.Client(api_key=api_key)
+              client = genai.Client(
+                  api_key=api_key,
+                  http_options={'api_version': 'v1'}
+              )
               
               prompt = f"Tu es un expert TikTok/Shorts. Génère un script vidéo dynamique sur le sujet : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON avec les clés : 'video_subject', 'script' (texte de voix off) et 'search_terms' (liste de mots-clés de recherche vidéo en anglais). Aucun autre texte."
               
