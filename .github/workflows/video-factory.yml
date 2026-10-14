@@ -26,7 +26,7 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Création correcte du fichier config.toml
+      - name: Création propre du fichier config.toml
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -40,13 +40,17 @@ jobs:
           log_level = \"INFO\"
           llm_provider = \"gemini\"
           gemini_api_key = \"{g_key}\"
-          gemini_model_name = \"gemini-pro\"
+          gemini_model_name = \"gemini-1.5-flash\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
+
+          [gemini]
+          api_key = \"{g_key}\"
+          model_name = \"gemini-1.5-flash\"
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Fichier config.toml généré avec succès.')
+          print('Configuration config.toml écrite avec succès.')
           "
 
       - name: Lancer la génération de la vidéo
