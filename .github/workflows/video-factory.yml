@@ -21,29 +21,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Installation des dépendances
+      - name: Installation des dépendances et nouveau SDK Google
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install --upgrade google-generativeai
+          pip install google-genai
 
-      - name: Patch direct de la méthode de génération dans llm.py
+      - name: Patch direct de la méthode LLM avec google-genai
         run: |
           python -c "
           filepath = 'app/services/llm.py'
           with open(filepath, 'r', encoding='utf-8') as f:
               code = f.read()
 
-          # Patch radical: on force le modele gemini-1.5-flash dans la fonction de generation de reponse
           old_target = 'def _generate_response('
           new_logic = '''def _generate_response(*args, **kwargs):
-              import google.generativeai as genai
+              from google import genai
               import os
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              genai.configure(api_key=api_key)
-              model = genai.GenerativeModel('gemini-1.5-flash')
-              prompt = kwargs.get('prompt') or (args[1] if len(args) > 1 else args[0])
-              response = model.generate_content(prompt)
+              client = genai.Client(api_key=api_key)
+              
+              prompt = kwargs.get('prompt')
+              if not prompt:
+                  if len(args) > 1:
+                      prompt = args[1]
+                  elif len(args) > 0:
+                      prompt = args[0]
+                  else:
+                      prompt = ''
+              
+              response = client.models.generate_content(
+                  model='gemini-1.5-flash',
+                  contents=prompt,
+              )
               return response.text
 
           def _disabled_generate_response('''
@@ -52,9 +62,9 @@ jobs:
               code = code.replace(old_target, new_logic, 1)
               with open(filepath, 'w', encoding='utf-8') as f:
                   f.write(code)
-              print('PATCH APPLIQUÉ AVEC SUCCÈS.')
+              print('PATCH SWAP SDK GENERATIVE AI APPLIQUÉ AVEC SUCCÈS.')
           else:
-              print('Cible de patch introuvable, verification requise.')
+              print('Cible introuvable dans llm.py')
           "
 
       - name: Création du fichier config.toml
