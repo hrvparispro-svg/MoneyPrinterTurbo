@@ -16,18 +16,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installation de FFmpeg et ImageMagick (requis pour les sous-titres)
+      - name: Installation de FFmpeg, ImageMagick et dépendances système
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
 
-      - name: Installation des dépendances et du SDK Google
+      - name: Installation des dépendances Python (SDK Google & Whisper pour les sous-titres)
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-genai
+          pip install google-genai openai-whisper
 
-      - name: Patch global (Script long > 1 min + TTS Gemini 3.8 Flash 'Bodi')
+      - name: Patch global (Script long > 1 min + Remplacement TTS par Gemini Bodi)
         run: |
           cat << 'EOF' > patch_all.py
           import os
@@ -78,43 +78,76 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch de tts.py pour utiliser Gemini 3.8 Flash TTS (Voix Bodi)
-          tts_path = 'app/services/tts.py'
-          if os.path.exists(tts_path):
-              with open(tts_path, 'r', encoding='utf-8') as f:
-                  tts_code = f.read()
-              
-              # Ajout d'un wrapper TTS personnalisé
-              custom_tts = '''
-          def text_to_speech(text, voice_name="Bodi", tts_file="output.mp3", **kwargs):
+          # 2. Patch de voice.py pour intercepter Azure/Edge et utiliser Gemini 3.8 Flash TTS (Voix Bodi)
+          voice_path = 'app/services/voice.py'
+          if os.path.exists(voice_path):
+              with open(voice_path, 'r', encoding='utf-8') as f:
+                  voice_code = f.read()
+
+              gemini_tts_override = '''
+          def azure_tts_v1(text, voice_name="Bodi", tts_file="output.mp3", **kwargs):
               from google import genai
+              from google.genai import types
               import base64
+              
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
               
-              interaction = client.interactions.create(
-                  model="gemini-3.8-flash-tts",
-                  input=[{
-                      "type": "user_input",
-                      "content": [{"type": "text", "text": text}],
-                  }],
-                  response_format={"type": "audio"},
-                  generation_config={"speech_config": [{"voice": "Bodi"}]},
-              )
-              audio_bytes = base64.b64decode(interaction.output_audio.data)
-              with open(tts_file, "wb") as f:
-                  f.write(audio_bytes)
-              return tts_file
-              '''
-              tts_code += "\n" + custom_tts
-              with open(tts_path, 'w', encoding='utf-8') as f:
-                  f.write(tts_code)
+              try:
+                  interaction = client.interactions.create(
+                      model="gemini-3.8-flash-tts",
+                      input=[{
+                          "type": "user_input",
+                          "content": [{"type": "text", "text": text}],
+                      }],
+                      response_format={"type": "audio"},
+                      generation_config={"speech_config": [{"voice": "Bodi"}]},
+                  )
+                  audio_bytes = base64.b64decode(interaction.output_audio.data)
+                  with open(tts_file, "wb") as f:
+                      f.write(audio_bytes)
+                  return True
+              except Exception as e:
+                  print(f"Interaction TTS error, trying generate_content: {e}")
+                  response = client.models.generate_content(
+                      model="gemini-3.8-flash-tts",
+                      contents=text,
+                      config=types.GenerateContentConfig(
+                          response_modalities=["AUDIO"],
+                          speech_config=types.SpeechConfig(
+                              voice_config=types.VoiceConfig(
+                                  prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                      voice_name="Bodi"
+                                  )
+                              )
+                          )
+                      )
+                  )
+                  for part in response.candidates[0].content.parts:
+                      if part.inline_data and part.inline_data.data:
+                          audio_bytes = base64.b64decode(part.inline_data.data)
+                          with open(tts_file, "wb") as f:
+                              f.write(audio_bytes)
+                          return True
+              return False
 
-          print('PATCH GLOBAL RÉUSSI (Script > 1 min + Voix Bodi Gemini).')
+          def _disabled_azure_tts_v1(
+              '''
+
+              # Remplacement de azure_tts_v1 dans voice.py
+              if 'def azure_tts_v1(' in voice_code:
+                  voice_code = voice_code.replace('def azure_tts_v1(', gemini_tts_override, 1)
+              else:
+                  voice_code += "\n" + gemini_tts_override
+
+              with open(voice_path, 'w', encoding='utf-8') as f:
+                  f.write(voice_code)
+
+          print('PATCH GLOBAL GEMINI TTS (BODI) + SCRIPT LONG APPLIQUÉ.')
           EOF
           python patch_all.py
 
-      - name: Création du fichier config.toml (Sous-titres activés)
+      - name: Création du fichier config.toml (Whisper pour sous-titres & Voix Bodi)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -130,7 +163,7 @@ jobs:
           gemini_api_key = "{g_key}"
           pexels_api_keys = ["{p_key}"]
           output_dir = "./storage/output"
-          subtitle_provider = "edge"
+          subtitle_provider = "whisper"
 
           [video]
           voice_name = "Bodi"
@@ -143,7 +176,7 @@ jobs:
           EOF
           python make_config.py
 
-      - name: Lancer la génération de la vidéo longue (> 1 min)
+      - name: Lancer la génération de la vidéo (> 1 min, Voix Bodi & Sous-titres Whisper)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -154,7 +187,7 @@ jobs:
             --voice-name "Bodi" \
             --subtitle-enabled
 
-      - name: Sauvegarder UNIQUEMENT la vidéo finale MP4
+      - name: Sauvegarder la vidéo finale MP4
         uses: actions/upload-artifact@v4
         with:
           name: video-finale-hrv
