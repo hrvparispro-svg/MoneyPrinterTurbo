@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper requests
 
-      - name: Patch global (Script long > 1 min + TTS Gemini Bodi + Sous-titres mot par mot Montserrat)
+      - name: Patch global (Script long > 1 min + Payload API Gemini Bodi corrigé + Sous-titres Montserrat)
         run: |
           cat << 'EOF' > patch_all.py
           import os
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Remplacement du TTS par l'API REST Directe Gemini 3.8 Flash TTS (Voix Bodi) sans erreur d'URL
+          # 2. Patch TTS avec la structure de payload racine correcte pour Gemini 3.8 Flash TTS
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -92,17 +92,22 @@ jobs:
               if not tts_file: tts_file = 'output.mp3'
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              url = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=)" + api_key
               
+              p1 = "https://generativelanguage."
+              p2 = "[googleapis.com/v1beta/models/](https://googleapis.com/v1beta/models/)"
+              p3 = "gemini-3.8-flash-tts:generateContent"
+              url = p1 + p2 + p3 + "?key=" + api_key
+              
+              # Correction structurelle : speechConfig est placé à la racine du payload
               payload = {
                   "contents": [{"parts": [{"text": text}]}],
                   "generationConfig": {
-                      "responseModalities": ["AUDIO"],
-                      "speechConfig": {
-                          "voiceConfig": {
-                              "prebuiltVoiceConfig": {
-                                  "voiceName": "Bodi"
-                              }
+                      "responseModalities": ["AUDIO"]
+                  },
+                  "speechConfig": {
+                      "voiceConfig": {
+                          "prebuiltVoiceConfig": {
+                              "voiceName": "Bodi"
                           }
                       }
                   }
@@ -135,7 +140,7 @@ jobs:
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          # 3. Optimisation de Whisper pour afficher les sous-titres mot par mot (max 2 mots par ligne)
+          # 3. Optimisation de Whisper pour sous-titres dynamiques (max 2 mots par ligne)
           subtitle_path = 'app/services/subtitle.py'
           if os.path.exists(subtitle_path):
               with open(subtitle_path, 'r', encoding='utf-8') as f:
@@ -145,7 +150,7 @@ jobs:
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH PROPRE APPLIQUÉ.')
+          print('PATCH PAYLOAD RACINE CORRIGÉ.')
           EOF
           python patch_all.py
 
