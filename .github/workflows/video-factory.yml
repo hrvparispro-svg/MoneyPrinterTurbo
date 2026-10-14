@@ -21,12 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Installation des dépendances
+      - name: Installation des dépendances et mise à jour Gemini SDK
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+          pip install --upgrade google-generativeai
 
-      - name: Création propre du fichier config.toml
+      - name: Création sécurisée du fichier config.toml
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -43,14 +44,10 @@ jobs:
           gemini_model_name = \"gemini-1.5-flash\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
-
-          [gemini]
-          api_key = \"{g_key}\"
-          model_name = \"gemini-1.5-flash\"
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Configuration config.toml écrite avec succès.')
+          print('Fichier config.toml généré avec succès.')
           "
 
       - name: Lancer la génération de la vidéo
