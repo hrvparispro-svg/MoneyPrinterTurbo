@@ -28,21 +28,27 @@ jobs:
 
       - name: Création du fichier de configuration config.toml
         run: |
-          cat << EOF > config.toml
-          [app]
-          log_level = "INFO"
-          llm_provider = "gemini"
-          output_dir = "./storage/output"
+          python -c "
+          config = '''[app]
+          log_level = \"INFO\"
+          llm_provider = \"gemini\"
+          output_dir = \"./storage/output\"
 
           [gemini]
-          api_key = "${{ secrets.GEMINI_API_KEY }}"
-          model_name = "gemini-1.5-flash"
+          api_key = \"${{ secrets.GEMINI_API_KEY }}\"
+          model_name = \"gemini-1.5-flash\"
 
           [pexels]
-          api_keys = ["${{ secrets.PEXELS_API_KEY }}"]
-          EOF
+          api_keys = [\"${{ secrets.PEXELS_API_KEY }}\"]
+          '''
+          with open('config.toml', 'w', encoding='utf-8') as f:
+              f.write(config)
+          "
 
       - name: Lancer la génération de la vidéo
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
           python cli.py --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" --video-lang "fr"
 
