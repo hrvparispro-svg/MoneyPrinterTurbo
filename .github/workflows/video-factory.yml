@@ -27,14 +27,16 @@ jobs:
           pip install -r requirements.txt
           pip install --upgrade google-generativeai
 
-      - name: Patch du code source (Mise à niveau forcée vers gemini-1.5-flash)
+      - name: Patch du code source (Forcer gemini-1.5-flash-latest)
         run: |
           python -c "
           with open('app/services/llm.py', 'r', encoding='utf-8') as f:
               code = f.read()
-          # Remplacement du fallback automatique vers gemini-3.1-pro par gemini-1.5-flash
-          code = code.replace('gemini-3.1-pro-preview', 'gemini-1.5-flash')
-          code = code.replace('gemini-1.0-pro', 'gemini-1.5-flash')
+          # Remplace toutes les variantes obsolètes/erronées par l'identifiant exact v1beta
+          code = code.replace('gemini-3.1-pro-preview', 'gemini-1.5-flash-latest')
+          code = code.replace('gemini-1.0-pro', 'gemini-1.5-flash-latest')
+          code = code.replace('gemini-1.5-flash', 'gemini-1.5-flash-latest')
+          code = code.replace('gemini-1.5-flash-latest-latest', 'gemini-1.5-flash-latest')
           with open('app/services/llm.py', 'w', encoding='utf-8') as f:
               f.write(code)
           print('Patch llm.py appliqué avec succès.')
@@ -54,7 +56,7 @@ jobs:
           log_level = \"INFO\"
           llm_provider = \"gemini\"
           gemini_api_key = \"{g_key}\"
-          gemini_model_name = \"gemini-1.5-flash\"
+          gemini_model_name = \"gemini-1.5-flash-latest\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
           '''
