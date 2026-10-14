@@ -27,19 +27,34 @@ jobs:
           pip install -r requirements.txt
           pip install --upgrade google-generativeai
 
-      - name: Patch du code source (Forcer gemini-1.5-flash-latest)
+      - name: Patch direct de la méthode de génération dans llm.py
         run: |
           python -c "
-          with open('app/services/llm.py', 'r', encoding='utf-8') as f:
+          filepath = 'app/services/llm.py'
+          with open(filepath, 'r', encoding='utf-8') as f:
               code = f.read()
-          # Remplace toutes les variantes obsolètes/erronées par l'identifiant exact v1beta
-          code = code.replace('gemini-3.1-pro-preview', 'gemini-1.5-flash-latest')
-          code = code.replace('gemini-1.0-pro', 'gemini-1.5-flash-latest')
-          code = code.replace('gemini-1.5-flash', 'gemini-1.5-flash-latest')
-          code = code.replace('gemini-1.5-flash-latest-latest', 'gemini-1.5-flash-latest')
-          with open('app/services/llm.py', 'w', encoding='utf-8') as f:
-              f.write(code)
-          print('Patch llm.py appliqué avec succès.')
+
+          # Patch radical: on force le modele gemini-1.5-flash dans la fonction de generation de reponse
+          old_target = 'def _generate_response('
+          new_logic = '''def _generate_response(*args, **kwargs):
+              import google.generativeai as genai
+              import os
+              api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+              genai.configure(api_key=api_key)
+              model = genai.GenerativeModel('gemini-1.5-flash')
+              prompt = kwargs.get('prompt') or (args[1] if len(args) > 1 else args[0])
+              response = model.generate_content(prompt)
+              return response.text
+
+          def _disabled_generate_response('''
+
+          if old_target in code:
+              code = code.replace(old_target, new_logic, 1)
+              with open(filepath, 'w', encoding='utf-8') as f:
+                  f.write(code)
+              print('PATCH APPLIQUÉ AVEC SUCCÈS.')
+          else:
+              print('Cible de patch introuvable, verification requise.')
           "
 
       - name: Création du fichier config.toml
@@ -56,7 +71,7 @@ jobs:
           log_level = \"INFO\"
           llm_provider = \"gemini\"
           gemini_api_key = \"{g_key}\"
-          gemini_model_name = \"gemini-1.5-flash-latest\"
+          gemini_model_name = \"gemini-1.5-flash\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
           '''
