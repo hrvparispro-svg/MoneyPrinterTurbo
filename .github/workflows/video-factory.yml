@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Installation des dépendances et du SDK Google
+      - name: Installation des dépendances et du SDK Google moderne
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
@@ -37,7 +37,6 @@ jobs:
           target = 'def generate_script('
           new_func = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
               from google import genai
-              from google.genai import types
               import os, json
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
@@ -49,7 +48,7 @@ jobs:
               prompt = f"Tu es un expert TikTok/Shorts. Génère un script vidéo dynamique sur le sujet : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON avec les clés : 'video_subject', 'script' (texte de voix off) et 'search_terms' (liste de mots-clés de recherche vidéo en anglais). Aucun autre texte."
               
               res = client.models.generate_content(
-                  model='gemini-1.5-flash',
+                  model='gemini-2.5-flash',
                   contents=prompt,
               )
               
