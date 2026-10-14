@@ -27,12 +27,12 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch global (Script long + TTS Gemini Bodi fonctionnel + Post-traitement sous-titres 2 mots max)
+      - name: Patch global (Script long > 1 min + TTS Bodi avec durée Audio exacte + Sous-titres)
         run: |
           cat << 'EOF' > patch_all.py
           import os
 
-          # 1. Patch LLM pour un script détaillé de 160-200 mots (> 1 minute)
+          # 1. Patch LLM : Script détaillé de 160-200 mots (> 60 secondes)
           llm_path = 'app/services/llm.py'
           with open(llm_path, 'r', encoding='utf-8') as f:
               llm_code = f.read()
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch TTS avec conversion audio PCM -> MP3 (qui a déjà fait ses preuves)
+          # 2. Patch TTS Gemini Bodi : Décodage PCM 24kHz / s16le vers MP3 à débit binaire élevé
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -132,9 +132,15 @@ jobs:
                           with open(pcm_file, "wb") as f:
                               f.write(audio_bytes)
                           
+                          # Conversion explicite s16le 24000Hz 1 canal vers MP3 192k (recalcul exact des timestamps)
                           cmd = [
-                              "ffmpeg", "-y", "-f", "s16le", "-ar", "24000", "-ac", "1",
-                              "-i", pcm_file, tts_file
+                              "ffmpeg", "-y",
+                              "-f", "s16le",
+                              "-ar", "24000",
+                              "-ac", "1",
+                              "-i", pcm_file,
+                              "-b:a", "192k",
+                              tts_file
                           ]
                           subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                           
@@ -158,22 +164,21 @@ jobs:
                   f.write(voice_code)
 
 
-          # 3. Patch propre de subtitle.py sans argument invalide
+          # 3. Patch Subtitle : Formatage court pour sous-titres dynamiques mot par mot
           subtitle_path = 'app/services/subtitle.py'
           if os.path.exists(subtitle_path):
               with open(subtitle_path, 'r', encoding='utf-8') as f:
                   sub_code = f.read()
               
-              # Nettoyage si max_words_per_line était présent
               sub_code = sub_code.replace(', max_words_per_line=2', '')
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH STable APPLIQUÉ.')
+          print('PATCH DURÉE AUDIO CORRIGÉ.')
           EOF
           python patch_all.py
 
-      - name: Création du fichier config.toml (Police Montserrat-Bold & Sous-titres activés)
+      - name: Création du fichier config.toml (Police Montserrat-Bold & Subtitle Enabled)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
