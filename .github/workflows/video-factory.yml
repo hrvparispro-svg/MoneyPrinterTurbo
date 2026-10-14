@@ -30,7 +30,7 @@ jobs:
       - name: Patch global (Script long > 1 min + TTS Gemini Bodi + Sous-titres mot par mot Montserrat)
         run: |
           cat << 'EOF' > patch_all.py
-          import os, re
+          import os
 
           # 1. Script de voix off long (> 1 min)
           llm_path = 'app/services/llm.py'
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Remplacement du TTS par l'API REST Directe Gemini 3.8 Flash TTS (Voix Bodi)
+          # 2. Remplacement du TTS par l'API REST Directe Gemini 3.8 Flash TTS (Voix Bodi) sans erreur d'URL
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -92,7 +92,7 @@ jobs:
               if not tts_file: tts_file = 'output.mp3'
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=){api_key}"
+              url = "[https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent?key=)" + api_key
               
               payload = {
                   "contents": [{"parts": [{"text": text}]}],
@@ -145,7 +145,7 @@ jobs:
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH GEMINI TTS (BODI) + WHISPER WORD-BY-WORD APPLIQUÉ.')
+          print('PATCH PROPRE APPLIQUÉ.')
           EOF
           python patch_all.py
 
