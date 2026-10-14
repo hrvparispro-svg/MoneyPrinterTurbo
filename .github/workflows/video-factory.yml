@@ -25,19 +25,6 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install --upgrade google-generativeai
-
-      - name: Patch du code source (Mise à niveau Gemini API)
-        run: |
-          python -c "
-          with open('app/services/llm.py', 'r', encoding='utf-8') as f:
-              code = f.read()
-          # Correction de l'endpoint API v1beta vers v1 et du nom de modèle
-          code = code.replace('v1beta', 'v1')
-          with open('app/services/llm.py', 'w', encoding='utf-8') as f:
-              f.write(code)
-          print('Patch llm.py appliqué avec succès.')
-          "
 
       - name: Création sécurisée du fichier config.toml
         env:
@@ -53,7 +40,7 @@ jobs:
           log_level = \"INFO\"
           llm_provider = \"gemini\"
           gemini_api_key = \"{g_key}\"
-          gemini_model_name = \"gemini-1.5-flash\"
+          gemini_model_name = \"gemini-1.0-pro\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
           '''
