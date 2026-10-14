@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai
 
-      - name: Patch global de llm.py (Script + Terms)
+      - name: Patch global de llm.py (Script + Terms sans SyntaxError)
         run: |
           cat << 'EOF' > patch_llm.py
           filepath = 'app/services/llm.py'
@@ -84,7 +84,7 @@ jobs:
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
               
-              prompt = f"Génère une liste de 4 termes de recherche vidéo en anglais pertinents pour Pexels sur le sujet : '{video_subject}'. Réponds STRICTEMENT sous forme de liste JSON de chaînes de caractères (ex: [\"term1\", \"term2\", \"term3\", \"term4\"])."
+              prompt = f"Génère une liste de 4 termes de recherche vidéo en anglais pertinents pour Pexels sur le sujet : '{video_subject}'. Réponds STRICTEMENT sous forme de liste JSON de chaînes de caractères."
               
               try:
                   res = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
@@ -108,7 +108,7 @@ jobs:
 
           with open(filepath, 'w', encoding='utf-8') as f:
               f.write(code)
-          print('PATCH GLOBAL LLM APPLIQUÉ AVEC SUCCÈS.')
+          print('PATCH GLOBAL LLM CORRIGÉ APPLIQUÉ AVEC SUCCÈS.')
           EOF
           python patch_llm.py
 
