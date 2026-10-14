@@ -40,7 +40,7 @@ jobs:
           log_level = \"INFO\"
           llm_provider = \"gemini\"
           gemini_api_key = \"{g_key}\"
-          gemini_model_name = \"gemini-1.5-flash\"
+          gemini_model_name = \"gemini-pro\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
           '''
