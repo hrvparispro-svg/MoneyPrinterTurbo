@@ -37,7 +37,7 @@ jobs:
           target = 'def generate_script('
           new_func = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
               from google import genai
-              import os, json
+              import os, json, time
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(
@@ -47,10 +47,24 @@ jobs:
               
               prompt = f"Tu es un expert TikTok/Shorts. Génère un script vidéo dynamique sur le sujet : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON avec les clés : 'video_subject', 'script' (texte de voix off) et 'search_terms' (liste de mots-clés de recherche vidéo en anglais). Aucun autre texte."
               
-              res = client.models.generate_content(
-                  model='gemini-3.8-flash',
-                  contents=prompt,
-              )
+              # Retry automatique pour gérer les erreurs 503 (surcharge API)
+              res = None
+              for attempt in range(5):
+                  try:
+                      res = client.models.generate_content(
+                          model='gemini-3.8-flash',
+                          contents=prompt,
+                      )
+                      break
+                  except Exception as e:
+                      if "503" in str(e) or "UNAVAILABLE" in str(e):
+                          print(f"Avertissement 503 (surcharge Gemini), tentative {attempt+1}/5 dans 5s...")
+                          time.sleep(5)
+                      else:
+                          raise e
+              
+              if not res:
+                  raise Exception("Impossible de contacter Gemini après 5 tentatives.")
               
               text = res.text.strip()
               if text.startswith('```json'):
@@ -69,7 +83,7 @@ jobs:
               code = code.replace(target, new_func, 1)
               with open(filepath, 'w', encoding='utf-8') as f:
                   f.write(code)
-              print('PATCH APPLIQUÉ AVEC SUCCÈS.')
+              print('PATCH ANTI-503 APPLIQUÉ AVEC SUCCÈS.')
           else:
               print('ERREUR : Fonction target introuvable.')
           EOF
