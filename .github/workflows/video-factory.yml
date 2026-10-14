@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai
 
-      - name: Patch global de llm.py (Script + Terms sans SyntaxError)
+      - name: Patch global de llm.py (Script + Terms)
         run: |
           cat << 'EOF' > patch_llm.py
           filepath = 'app/services/llm.py'
@@ -108,7 +108,7 @@ jobs:
 
           with open(filepath, 'w', encoding='utf-8') as f:
               f.write(code)
-          print('PATCH GLOBAL LLM CORRIGÉ APPLIQUÉ AVEC SUCCÈS.')
+          print('PATCH GLOBAL LLM APPLIQUÉ AVEC SUCCÈS.')
           EOF
           python patch_llm.py
 
@@ -146,4 +146,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: video-test-hrv
-          path: ./storage/output/*.mp4
+          path: |
+            ./storage/**/*.mp4
+            ./storage/output/**/*.mp4
