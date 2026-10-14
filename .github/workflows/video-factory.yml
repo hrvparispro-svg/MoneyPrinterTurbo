@@ -27,12 +27,12 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch global (Script long + TTS Gemini Bodi WAV/MP3 fixe + Durée Audio garantie)
+      - name: Patch Debug Audio & LLM
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave
 
-          # 1. LLM : Script détaillé (160-200 mots > 60s)
+          # LLM
           llm_path = 'app/services/llm.py'
           with open(llm_path, 'r', encoding='utf-8') as f:
               llm_code = f.read()
@@ -41,12 +41,9 @@ jobs:
           new_script = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
               from google import genai
               import time
-              
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
-              
               prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets, sans titre."
-              
               res = None
               for attempt in range(3):
                   try:
@@ -54,10 +51,8 @@ jobs:
                       if res and res.text: break
                   except Exception:
                       time.sleep(3)
-              
               if res and res.text:
                   return res.text.strip().replace('```', '')
-
               return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
 
           def _disabled_generate_script('''
@@ -77,8 +72,7 @@ jobs:
           with open(llm_path, 'w', encoding='utf-8') as f:
               f.write(llm_code)
 
-
-          # 2. TTS Gemini : Conversion explicite en WAV 24kHz puis encodage MP3 avec métadonnées de durée
+          # TTS
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -92,14 +86,12 @@ jobs:
               
               text = ""
               tts_file = "output.mp3"
-              
               for arg in args:
                   if isinstance(arg, str):
                       if arg.endswith(".mp3") or "/" in arg or "\\\\" in arg:
                           tts_file = arg
                       elif not text:
                           text = arg
-              
               if not text:
                   text = kwargs.get("text", "Texte par défaut")
               if "tts_file" in kwargs and isinstance(kwargs["tts_file"], str):
@@ -127,7 +119,6 @@ jobs:
                       if part.inline_data and part.inline_data.data:
                           raw_data = base64.b64decode(part.inline_data.data)
                           os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
-                          
                           wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
                           with wave.open(wav_tmp, 'wb') as wf:
                               wf.setnchannels(1)
@@ -135,19 +126,22 @@ jobs:
                               wf.setframerate(24000)
                               wf.writeframes(raw_data)
                           
-                          cmd = [
-                              "ffmpeg", "-y",
-                              "-i", wav_tmp,
-                              "-c:a", "libmp3lame",
-                              "-b:a", "192k",
-                              "-write_xg", "1",
-                              tts_file
-                          ]
+                          cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
                           subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                           
                           if os.path.exists(wav_tmp):
                               os.remove(wav_tmp)
-                              
+                          
+                          # LOG DEBUG
+                          size = os.path.getsize(tts_file) if os.path.exists(tts_file) else 0
+                          dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", tts_file]
+                          dur_res = subprocess.run(dur_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                          print(f"--- DEBUG AUDIO GENERATED ---")
+                          print(f"Path: {tts_file}")
+                          print(f"Size: {size} bytes")
+                          print(f"Duration ffprobe: {dur_res.stdout.strip()}s")
+                          print(f"-----------------------------")
+                          
                           return tts_file
               except Exception as e:
                   print(f"Gemini 3.8 Flash TTS Error: {e}")
@@ -161,33 +155,9 @@ jobs:
               else:
                   voice_code += "\n" + gemini_tts_override
 
-              # Surcharge forcée de la fonction de calcul de durée
-              duration_override = '''
-          def get_audio_duration(file_path, **kwargs):
-              import subprocess
-              path_str = str(file_path)
-              if not path_str or not os.path.exists(path_str):
-                  return 60.0
-              try:
-                  cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path_str]
-                  res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-                  dur = float(res.stdout.strip())
-                  if dur > 1.0:
-                      return dur
-              except Exception as e:
-                  print(f"Error ffprobe: {e}")
-              return 60.0
-
-          def _disabled_get_audio_duration(
-              '''
-              
-              if 'def get_audio_duration(' in voice_code:
-                  voice_code = voice_code.replace('def get_audio_duration(', duration_override, 1)
-
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          print('PATCH DUREE BLINDE APPLIQUE.')
           EOF
           python patch_all.py
 
@@ -219,11 +189,10 @@ jobs:
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Config.toml générée.')
           EOF
           python make_config.py
 
-      - name: Lancer la génération de la vidéo (> 1 min, Voix Bodi & Sous-titres Montserrat)
+      - name: Lancer la génération de la vidéo
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -234,8 +203,13 @@ jobs:
             --voice-name "Bodi" \
             --subtitle-enabled
 
-      - name: Sauvegarder la vidéo finale MP4
-        uses: actions/upload-artifact@v4
-        with:
-          name: video-finale-hrv
-          path: ./storage/tasks/**/final-*.mp4
+      - name: Inspecter les fichiers et la durée audio générée
+        if: always()
+        run: |
+          echo "=== ARBORESCENCE ET DUREE AUDIO ==="
+          find ./storage -type f
+          for f in $(find ./storage -name "*.mp3"); do
+            echo "Fichier: $f"
+            ls -lh "$f"
+            ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$f" || true
+          done
