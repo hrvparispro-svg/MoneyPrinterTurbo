@@ -25,8 +25,22 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+          pip install --upgrade google-generativeai
 
-      - name: Création sécurisée du fichier config.toml
+      - name: Patch du code source (Mise à niveau forcée vers gemini-1.5-flash)
+        run: |
+          python -c "
+          with open('app/services/llm.py', 'r', encoding='utf-8') as f:
+              code = f.read()
+          # Remplacement du fallback automatique vers gemini-3.1-pro par gemini-1.5-flash
+          code = code.replace('gemini-3.1-pro-preview', 'gemini-1.5-flash')
+          code = code.replace('gemini-1.0-pro', 'gemini-1.5-flash')
+          with open('app/services/llm.py', 'w', encoding='utf-8') as f:
+              f.write(code)
+          print('Patch llm.py appliqué avec succès.')
+          "
+
+      - name: Création du fichier config.toml
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -40,12 +54,13 @@ jobs:
           log_level = \"INFO\"
           llm_provider = \"gemini\"
           gemini_api_key = \"{g_key}\"
-          gemini_model_name = \"gemini-1.0-pro\"
+          gemini_model_name = \"gemini-1.5-flash\"
           pexels_api_keys = [\"{p_key}\"]
           output_dir = \"./storage/output\"
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
+          print('Fichier config.toml généré.')
           "
 
       - name: Lancer la génération de la vidéo
