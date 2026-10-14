@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai
 
-      - name: Patch global de llm.py (Script + Terms)
+      - name: Patch global de llm.py (Voix Off Homme + Script Pur)
         run: |
           cat << 'EOF' > patch_llm.py
           filepath = 'app/services/llm.py'
@@ -43,7 +43,7 @@ jobs:
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
               
-              prompt = f"Tu es un expert TikTok/Shorts. Génère un script vidéo dynamique sur le sujet : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON avec les clés : 'video_subject', 'script' (texte de voix off) et 'search_terms' (liste de mots-clés de recherche vidéo en anglais). Aucun autre texte."
+              prompt = f"Tu es un expert TikTok. Génère un script sur : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON : {{\\"video_subject\\": \\"{video_subject}\\", \\"script\\": \\"Texte de voix off ici\\", \\"search_terms\\": [\\"term1\\", \\"term2\\"]}}"
               
               res = None
               for attempt in range(3):
@@ -59,14 +59,15 @@ jobs:
                   if text.startswith('```'): text = text[3:]
                   if text.endswith('```'): text = text[:-3]
                   try:
-                      return json.dumps(json.loads(text.strip()), ensure_ascii=False)
+                      json_obj = json.loads(text.strip())
+                      return json.dumps(json_obj, ensure_ascii=False)
                   except Exception:
                       pass
 
               fallback_data = {
                   "video_subject": video_subject,
                   "script": "Le stress au travail peut impacter votre santé mentale. Pour vous protéger, posez des limites claires, pratiquez la respiration profonde et faites des pauses régulières. Prenez soin de votre bien-être au quotidien sur hrv-paris.com.",
-                  "search_terms": ["work stress", "mental health", "meditation office", "relaxation"]
+                  "search_terms": ["work stress", "mental health", "office relaxation", "meditation"]
               }
               return json.dumps(fallback_data, ensure_ascii=False)
 
@@ -78,27 +79,6 @@ jobs:
           # 2. Remplacement de generate_terms
           target_terms = 'def generate_terms('
           new_terms = '''def generate_terms(video_subject, paragraph_number=1, language="fr", **kwargs):
-              from google import genai
-              import os, json, time
-              
-              api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
-              
-              prompt = f"Génère une liste de 4 termes de recherche vidéo en anglais pertinents pour Pexels sur le sujet : '{video_subject}'. Réponds STRICTEMENT sous forme de liste JSON de chaînes de caractères."
-              
-              try:
-                  res = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
-                  if res and res.text:
-                      text = res.text.strip()
-                      if text.startswith('```json'): text = text[7:]
-                      if text.startswith('```'): text = text[3:]
-                      if text.endswith('```'): text = text[:-3]
-                      terms = json.loads(text.strip())
-                      if isinstance(terms, list):
-                          return terms
-              except Exception:
-                  pass
-
               return ["work stress", "mental health", "office relaxation", "meditation"]
 
           def _disabled_generate_terms('''
@@ -108,11 +88,11 @@ jobs:
 
           with open(filepath, 'w', encoding='utf-8') as f:
               f.write(code)
-          print('PATCH GLOBAL LLM APPLIQUÉ AVEC SUCCÈS.')
+          print('PATCH PARFAIT APPLIQUÉ.')
           EOF
           python patch_llm.py
 
-      - name: Création du fichier config.toml
+      - name: Création du fichier config.toml (Voix Homme Mûre + Sous-titres)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -128,10 +108,16 @@ jobs:
           gemini_api_key = "{g_key}"
           pexels_api_keys = ["{p_key}"]
           output_dir = "./storage/output"
+          subtitle_provider = "edge"
+
+          [video]
+          voice_name = "fr-FR-HenriNeural"
+          video_volume = 0.0
+          subtitle_enabled = true
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Fichier config.toml généré.')
+          print('Config générée avec voix masculine fr-FR-HenriNeural et sous-titres.')
           EOF
           python make_config.py
 
@@ -142,10 +128,8 @@ jobs:
         run: |
           python cli.py --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" --video-lang "fr"
 
-      - name: Sauvegarder la vidéo dans les résultats
+      - name: Sauvegarder UNIQUEMENT la vidéo finale MP4
         uses: actions/upload-artifact@v4
         with:
-          name: video-test-hrv
-          path: |
-            ./storage/**/*.mp4
-            ./storage/output/**/*.mp4
+          name: video-finale-hrv
+          path: ./storage/tasks/**/final-*.mp4
