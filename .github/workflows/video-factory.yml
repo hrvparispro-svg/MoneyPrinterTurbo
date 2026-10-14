@@ -29,33 +29,20 @@ jobs:
 
       - name: Patch racine de generate_script dans llm.py
         run: |
-          python -c "
+          cat << 'EOF' > patch_llm.py
           filepath = 'app/services/llm.py'
           with open(filepath, 'r', encoding='utf-8') as f:
               code = f.read()
 
-          # On intercepte et remplace directement la fonction generate_script
           target = 'def generate_script('
-          new_func = '''def generate_script(video_subject, language=\"fr\", paragraph_number=1, **kwargs):
+          new_func = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
               from google import genai
               import os, json
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key)
               
-              prompt = f\"\"\"
-              Tu es un expert en création de contenu court (TikTok/Shorts).
-              Génère un script vidéo dynamique sur le sujet : '{video_subject}'.
-              Rédige le script en {language}.
-              
-              Tu DOIS répondre STRICTEMENT au format JSON avec la structure exacte suivante :
-              {{
-                  \"video_subject\": \"{video_subject}\",
-                  \"script\": \"Texte complet de la voix off à lire de manière fluide et captivante.\",
-                  \"search_terms\": [\"terme_recherche_pexels_1\", \"terme_recherche_pexels_2\"]
-              }}
-              N'ajoute aucun texte, aucun markdown autour, uniquement du JSON valide.
-              \"\"\"
+              prompt = f"Tu es un expert TikTok/Shorts. Génère un script vidéo dynamique sur le sujet : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON avec les clés : 'video_subject', 'script' (texte de voix off) et 'search_terms' (liste de mots-clés de recherche vidéo en anglais). Aucun autre texte."
               
               res = client.models.generate_content(
                   model='gemini-1.5-flash',
@@ -79,32 +66,34 @@ jobs:
               code = code.replace(target, new_func, 1)
               with open(filepath, 'w', encoding='utf-8') as f:
                   f.write(code)
-              print('PATCH DEFINITIF APPLIQUÉ AVEC SUCCÈS.')
+              print('PATCH APPLIQUÉ AVEC SUCCÈS.')
           else:
-              print('ERREUR : Fonction generate_script introuvable.')
-          "
+              print('ERREUR : Fonction target introuvable.')
+          EOF
+          python patch_llm.py
 
       - name: Création du fichier config.toml
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
-          python -c "
+          cat << 'EOF' > make_config.py
           import os
           g_key = os.environ.get('GEMINI_API_KEY', '').strip()
           p_key = os.environ.get('PEXELS_API_KEY', '').strip()
-          
+
           config = f'''[app]
-          log_level = \"INFO\"
-          llm_provider = \"gemini\"
-          gemini_api_key = \"{g_key}\"
-          pexels_api_keys = [\"{p_key}\"]
-          output_dir = \"./storage/output\"
+          log_level = "INFO"
+          llm_provider = "gemini"
+          gemini_api_key = "{g_key}"
+          pexels_api_keys = ["{p_key}"]
+          output_dir = "./storage/output"
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
           print('Fichier config.toml généré.')
-          "
+          EOF
+          python make_config.py
 
       - name: Lancer la génération de la vidéo
         env:
