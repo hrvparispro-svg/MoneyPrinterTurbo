@@ -16,23 +16,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installation de FFmpeg, ImageMagick et police Montserrat
+      - name: Installation de FFmpeg, ImageMagick et polices Montserrat
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fonts-montserrat
 
-      - name: Installation des dépendances Python (SDK Google v1beta & Whisper)
+      - name: Installation des dépendances Python
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch global (Script long > 1 min + TTS Bodi avec durée Audio exacte + Sous-titres)
+      - name: Patch global (Script long + TTS Gemini Bodi WAV/MP3 fixe + Sous-titres 2 mots max)
         run: |
           cat << 'EOF' > patch_all.py
-          import os
+          import os, re
 
-          # 1. Patch LLM : Script détaillé de 160-200 mots (> 60 secondes)
+          # 1. LLM : Script détaillé de 160-200 mots (> 60s)
           llm_path = 'app/services/llm.py'
           with open(llm_path, 'r', encoding='utf-8') as f:
               llm_code = f.read()
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch TTS Gemini Bodi : Décodage PCM 24kHz / s16le vers MP3 à débit binaire élevé
+          # 2. TTS : Génération WAV propre avec conteneur valide pour recalculer la durée exacte
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -88,7 +88,7 @@ jobs:
           def azure_tts_v1(*args, **kwargs):
               from google import genai
               from google.genai import types
-              import base64, os, subprocess
+              import base64, os, subprocess, wave
               
               text = ""
               tts_file = "output.mp3"
@@ -125,31 +125,28 @@ jobs:
                   )
                   for part in response.candidates[0].content.parts:
                       if part.inline_data and part.inline_data.data:
-                          audio_bytes = base64.b64decode(part.inline_data.data)
+                          raw_data = base64.b64decode(part.inline_data.data)
                           os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
                           
-                          pcm_file = tts_file.replace('.mp3', '.pcm')
-                          with open(pcm_file, "wb") as f:
-                              f.write(audio_bytes)
+                          wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
                           
-                          # Conversion explicite s16le 24000Hz 1 canal vers MP3 192k (recalcul exact des timestamps)
-                          cmd = [
-                              "ffmpeg", "-y",
-                              "-f", "s16le",
-                              "-ar", "24000",
-                              "-ac", "1",
-                              "-i", pcm_file,
-                              "-b:a", "192k",
-                              tts_file
-                          ]
+                          # Écriture avec en-tête RIFF WAV valide (24kHz / 16-bit Mono)
+                          with wave.open(wav_tmp, 'wb') as wav_file:
+                              wav_file.setnchannels(1)
+                              wav_file.setsampwidth(2)
+                              wav_file.setframerate(24000)
+                              wav_file.writeframes(raw_data)
+                          
+                          # Re-encodage MP3 via FFmpeg
+                          cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-q:a", "2", tts_file]
                           subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                           
-                          if os.path.exists(pcm_file):
-                              os.remove(pcm_file)
+                          if os.path.exists(wav_tmp):
+                              os.remove(wav_tmp)
                               
                           return True
               except Exception as e:
-                  print(f"Gemini 3.8 Flash TTS SDK Error: {e}")
+                  print(f"Gemini 3.8 Flash TTS Error: {e}")
               return False
 
           def _disabled_azure_tts_v1(
@@ -164,17 +161,42 @@ jobs:
                   f.write(voice_code)
 
 
-          # 3. Patch Subtitle : Formatage court pour sous-titres dynamiques mot par mot
+          # 3. Subtitle : Découpage post-Whisper pour afficher au maximum 2 mots par ligne (Dynamic SRT)
           subtitle_path = 'app/services/subtitle.py'
           if os.path.exists(subtitle_path):
               with open(subtitle_path, 'r', encoding='utf-8') as f:
                   sub_code = f.read()
-              
+
+              # Nettoyage
               sub_code = sub_code.replace(', max_words_per_line=2', '')
+              
+              # Insertion d'un re-formateur SRT dynamique (2 mots max par ligne)
+              formatter_code = '''
+          def _split_srt_words(srt_path):
+              if not os.path.exists(srt_path): return
+              with open(srt_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              # Re-formattage basique pour découper les lignes longues en max 2 mots
+              lines = content.split('\\n')
+              new_lines = []
+              for line in lines:
+                  if '-->' not in line and not line.isdigit() and line.strip():
+                      words = line.strip().split()
+                      if len(words) > 2:
+                          chunked = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
+                          new_lines.append("\\n".join(chunked))
+                      else:
+                          new_lines.append(line)
+                  else:
+                      new_lines.append(line)
+              with open(srt_path, 'w', encoding='utf-8') as f:
+                  f.write("\\n".join(new_lines))
+          '''
+              sub_code += "\n" + formatter_code
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH DURÉE AUDIO CORRIGÉ.')
+          print('PATCH FIXE DURÉE WAV/MP3 APPLIQUÉ.')
           EOF
           python patch_all.py
 
