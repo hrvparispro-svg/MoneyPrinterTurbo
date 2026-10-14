@@ -16,23 +16,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installation de FFmpeg, ImageMagick et polices
+      - name: Installation de FFmpeg, ImageMagick et police Montserrat
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fonts-montserrat
 
-      - name: Installation des dépendances Python (Whisper & Requests)
+      - name: Installation des dépendances Python (SDK Google v1beta & Whisper)
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-genai openai-whisper requests
+          pip install google-genai openai-whisper
 
-      - name: Patch global (Script long > 1 min + TTS Gemini Bodi sécurisé + Sous-titres Montserrat)
+      - name: Patch global (Script long > 1 min + TTS Gemini v1beta 'Bodi' + Sous-titres Montserrat mot par mot)
         run: |
           cat << 'EOF' > patch_all.py
           import os
 
-          # 1. Script de voix off long (> 1 min)
+          # 1. Patch LLM pour un script détaillé de 160-200 mots (> 1 minute) et texte 100% pur
           llm_path = 'app/services/llm.py'
           with open(llm_path, 'r', encoding='utf-8') as f:
               llm_code = f.read()
@@ -43,9 +43,9 @@ jobs:
               import time
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1'})
+              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
               
-              prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets."
+              prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets, sans titre."
               
               res = None
               for attempt in range(3):
@@ -78,7 +78,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. Patch TTS avec URL blindée contre les auto-liens du chat
+          # 2. Patch TTS natif via SDK officiel pointant sur le modèle v1beta (Voix Bodi)
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -86,48 +86,40 @@ jobs:
 
               gemini_tts_override = '''
           def azure_tts_v1(*args, **kwargs):
-              import requests, json, base64, os
+              from google import genai
+              from google.genai import types
+              import base64, os
+              
               text = args[0] if len(args) > 0 else kwargs.get('text', '')
               tts_file = args[2] if len(args) > 2 else kwargs.get('tts_file', 'output.mp3')
               if not tts_file: tts_file = 'output.mp3'
               
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
               
-              # Construction sécurisée de l'URL sans chaîne brute pour éviter le parsing Markdown
-              scheme = "https"
-              subdomain = "generativelanguage"
-              domain = "googleapis.com"
-              path = "v1beta/models/gemini-3.8-flash-tts:generateContent"
-              url = f"{scheme}://{subdomain}.{domain}/{path}?key={api_key}"
-              
-              payload = {
-                  "contents": [{"parts": [{"text": text}]}],
-                  "generationConfig": {
-                      "responseModalities": ["AUDIO"]
-                  },
-                  "speechConfig": {
-                      "voiceConfig": {
-                          "prebuiltVoiceConfig": {
-                              "voiceName": "Bodi"
-                          }
-                      }
-                  }
-              }
-              
-              headers = {"Content-Type": "application/json"}
-              res = requests.post(url, json=payload, headers=headers)
-              
-              if res.status_code == 200:
-                  data = res.json()
-                  try:
-                      audio_b64 = data['candidates'][0]['content']['parts'][0]['inlineData']['data']
-                      with open(tts_file, 'wb') as f:
-                          f.write(base64.b64decode(audio_b64))
-                      return True
-                  except Exception as e:
-                      print(f"Error parsing Gemini TTS response: {e}")
-              else:
-                  print(f"Gemini TTS direct API Error ({res.status_code}): {res.text}")
+              try:
+                  response = client.models.generate_content(
+                      model="gemini-3.8-flash-tts",
+                      contents=text,
+                      config=types.GenerateContentConfig(
+                          response_modalities=["AUDIO"],
+                          speech_config=types.SpeechConfig(
+                              voice_config=types.VoiceConfig(
+                                  prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                      voice_name="Bodi"
+                                  )
+                              )
+                          )
+                      )
+                  )
+                  for part in response.candidates[0].content.parts:
+                      if part.inline_data and part.inline_data.data:
+                          audio_bytes = base64.b64decode(part.inline_data.data)
+                          with open(tts_file, "wb") as f:
+                              f.write(audio_bytes)
+                          return True
+              except Exception as e:
+                  print(f"Gemini 3.8 Flash TTS SDK Error: {e}")
               return False
 
           def _disabled_azure_tts_v1(
@@ -141,7 +133,8 @@ jobs:
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          # 3. Optimisation de Whisper pour sous-titres dynamiques (max 2 mots par ligne)
+
+          # 3. Optimisation Whisper : Forcer l'affichage dynamique (max 2 mots par ligne)
           subtitle_path = 'app/services/subtitle.py'
           if os.path.exists(subtitle_path):
               with open(subtitle_path, 'r', encoding='utf-8') as f:
@@ -151,11 +144,11 @@ jobs:
               with open(subtitle_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH SÉCURISÉ APPLIQUÉ.')
+          print('PATCH V1BETA GEMINI TTS + MONTSERRAT APPLIQUÉ.')
           EOF
           python patch_all.py
 
-      - name: Création du fichier config.toml (Police Montserrat & Whisper mot par mot)
+      - name: Création du fichier config.toml (Police Montserrat-Bold & Whisper dynamique)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
