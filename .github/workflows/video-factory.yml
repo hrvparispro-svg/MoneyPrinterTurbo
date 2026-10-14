@@ -48,7 +48,7 @@ jobs:
               prompt = f"Tu es un expert TikTok/Shorts. Génère un script vidéo dynamique sur le sujet : '{video_subject}'. Rédige en {language}. Réponds STRICTEMENT en JSON avec les clés : 'video_subject', 'script' (texte de voix off) et 'search_terms' (liste de mots-clés de recherche vidéo en anglais). Aucun autre texte."
               
               res = client.models.generate_content(
-                  model='gemini-2.5-flash',
+                  model='gemini-3.8-flash',
                   contents=prompt,
               )
               
