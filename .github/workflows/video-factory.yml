@@ -1,0 +1,51 @@
+name: Test Generation Video HRV Paris
+
+on:
+  workflow_dispatch: # Permet de lancer le test manuellement en 1 clic
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du code source
+        uses: actions/checkout@v4
+
+      - name: Configuration de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installation de FFmpeg (nécessaire pour la vidéo)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Installation des dépendances du projet
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Création du fichier de configuration
+        run: |
+          cat << EOF > config.toml
+          [app]
+          log_level = "INFO"
+          output_dir = "./storage/output"
+
+          [gemini]
+          api_key = "${{ secrets.GEMINI_API_KEY }}"
+
+          [pexels]
+          api_keys = ["${{ secrets.PEXELS_API_KEY }}"]
+          EOF
+
+      - name: Lancer la génération de la vidéo
+        run: |
+          python cli.py --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" --video-lang "fr"
+
+      - name: Sauvegarder la vidéo dans les résultats
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-test-hrv
+          path: ./storage/output/*.mp4
