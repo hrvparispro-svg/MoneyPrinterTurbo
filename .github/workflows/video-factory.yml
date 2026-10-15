@@ -27,12 +27,12 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch Global Verrouillé (Voix Bodi, Script > 60s, Zero Musique, Sous-titres 2 mots)
+      - name: Patch Global Sanitisé (Script Long + Gemini TTS Bodi + Zéro Musique + Sous-titres 2 mots max)
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave
 
-          # 1. GENERATION DE SCRIPT TRÈS LONG (> 80 secondes / 220-250 mots)
+          # 1. GENERATION DU SCRIPT LONG (> 60s / 200-250 mots)
           llm_path = 'app/services/llm.py'
           if os.path.exists(llm_path):
               with open(llm_path, 'r', encoding='utf-8') as f:
@@ -40,35 +40,35 @@ jobs:
 
               target_script = 'def generate_script('
               new_script = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
-                  from google import genai
-                  import time
-                  api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-                  client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
-                  prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, très complet, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument faire au moins 220 à 250 mots pour garantir une durée de lecture orale supérieure à 70 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans balises, sans JSON, sans guillemets, sans titre."
-                  
-                  res = None
-                  for attempt in range(3):
-                      try:
-                          res = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
-                          if res and res.text: break
-                      except Exception:
-                          time.sleep(3)
-                  
-                  if res and res.text:
-                      return res.text.strip().replace('```', '').replace('*', '').replace('#', '')
+    from google import genai
+    import time
+    api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+    client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
+    prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, très complet, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument faire au moins 220 à 250 mots pour garantir une durée de lecture orale supérieure à 70 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans balises, sans JSON, sans guillemets, sans titre."
+    
+    res = None
+    for attempt in range(3):
+        try:
+            res = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
+            if res and res.text: break
+        except Exception:
+            time.sleep(3)
+    
+    if res and res.text:
+        return res.text.strip().replace('```', '').replace('*', '').replace('#', '')
 
-                  return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
+    return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
 
-              def _disabled_generate_script('''
+def _disabled_generate_script('''
 
               if target_script in llm_code:
                   llm_code = llm_code.replace(target_script, new_script, 1)
 
               target_terms = 'def generate_terms('
               new_terms = '''def generate_terms(video_subject, paragraph_number=1, language="fr", **kwargs):
-                  return ["work stress", "mental health", "office relaxation", "meditation"]
+    return ["work stress", "mental health", "office relaxation", "meditation"]
 
-              def _disabled_generate_terms('''
+def _disabled_generate_terms('''
 
               if target_terms in llm_code:
                   llm_code = llm_code.replace(target_terms, new_terms, 1)
@@ -84,75 +84,75 @@ jobs:
                   voice_code = f.read()
 
               gemini_tts_override = '''
-          def azure_tts_v1(*args, **kwargs):
-              from google import genai
-              from google.genai import types
-              import base64, os, subprocess, wave
+def azure_tts_v1(*args, **kwargs):
+    from google import genai
+    from google.genai import types
+    import base64, os, subprocess, wave
 
-              text = ""
-              tts_file = "output.mp3"
-              for arg in args:
-                  if isinstance(arg, str):
-                      if arg.endswith(".mp3") or "/" in arg or "\\\\" in arg:
-                          tts_file = arg
-                      elif not text:
-                          text = arg
-              if not text:
-                  text = kwargs.get("text", "Texte par défaut")
-              if "tts_file" in kwargs and isinstance(kwargs["tts_file"], str):
-                  tts_file = kwargs["tts_file"]
+    text = ""
+    tts_file = "output.mp3"
+    for arg in args:
+        if isinstance(arg, str):
+            if arg.endswith(".mp3") or "/" in arg or "\\\\" in arg:
+                tts_file = arg
+            elif not text:
+                text = arg
+    if not text:
+        text = kwargs.get("text", "Texte par défaut")
+    if "tts_file" in kwargs and isinstance(kwargs["tts_file"], str):
+        tts_file = kwargs["tts_file"]
 
-              api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
+    api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+    client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
 
-              all_pcm_bytes = bytearray()
+    all_pcm_bytes = bytearray()
 
-              try:
-                  response_stream = client.models.generate_content_stream(
-                      model="gemini-3.8-flash-tts",
-                      contents=text,
-                      config=types.GenerateContentConfig(
-                          response_modalities=["AUDIO"],
-                          speech_config=types.SpeechConfig(
-                              voice_config=types.VoiceConfig(
-                                  prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                      voice_name="Bodi"
-                                  )
-                              )
-                          )
-                      )
-                  )
-                  for chunk in response_stream:
-                      if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
-                          for part in chunk.candidates[0].content.parts:
-                              if part.inline_data and part.inline_data.data:
-                                  all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
-              except Exception as e:
-                  print(f"Erreur Gemini TTS Stream Bodi : {e}")
+    try:
+        response_stream = client.models.generate_content_stream(
+            model="gemini-3.8-flash-tts",
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name="Bodi"
+                        )
+                    )
+                )
+            )
+        )
+        for chunk in response_stream:
+            if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
+                for part in chunk.candidates[0].content.parts:
+                    if part.inline_data and part.inline_data.data:
+                        all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
+    except Exception as e:
+        print(f"Erreur Gemini TTS Stream Bodi : {e}")
 
-              if not all_pcm_bytes:
-                  print("Erreur: Aucune donnée audio reçue.")
-                  return False
+    if not all_pcm_bytes:
+        print("Erreur: Aucune donnée audio reçue.")
+        return False
 
-              os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
-              wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
+    os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
+    wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
 
-              with wave.open(wav_tmp, 'wb') as wf:
-                  wf.setnchannels(1)
-                  wf.setsampwidth(2)
-                  wf.setframerate(24000)
-                  wf.writeframes(bytes(all_pcm_bytes))
+    with wave.open(wav_tmp, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(24000)
+        wf.writeframes(bytes(all_pcm_bytes))
 
-              cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
-              subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
+    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-              if os.path.exists(wav_tmp):
-                  os.remove(wav_tmp)
+    if os.path.exists(wav_tmp):
+        os.remove(wav_tmp)
 
-              return tts_file
+    return tts_file
 
-          def _disabled_azure_tts_v1(
-              '''
+def _disabled_azure_tts_v1(
+'''
 
               if 'def azure_tts_v1(' in voice_code:
                   voice_code = voice_code.replace('def azure_tts_v1(', gemini_tts_override, 1)
@@ -171,51 +171,51 @@ jobs:
 
               dynamic_sub_code = '''
 
-          def _split_srt_dynamic(srt_path):
-              if not os.path.exists(srt_path):
-                  return
-              with open(srt_path, 'r', encoding='utf-8') as f:
-                  content = f.read()
-              blocks = content.strip().split('\\n\\n')
-              new_blocks = []
-              counter = 1
-              def time_to_sec(t_str):
-                  try:
-                      parts = t_str.replace(',', '.').split(':')
-                      return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                  except Exception:
-                      return 0.0
-              def sec_to_time(sec):
-                  h = int(sec // 3600)
-                  m = int((sec % 3600) // 60)
-                  s = int(sec % 60)
-                  ms = int(round((sec - int(sec)) * 1000))
-                  return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-              for block in blocks:
-                  lines = block.split('\\n')
-                  if len(lines) >= 3 and '-->' in lines[1]:
-                      try:
-                          start_str, end_str = lines[1].split('-->')
-                          start_sec = time_to_sec(start_str.strip())
-                          end_sec = time_to_sec(end_str.strip())
-                          words = " ".join(lines[2:]).strip().split()
-                          if not words:
-                              continue
-                          chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
-                          total_dur = end_sec - start_sec
-                          chunk_dur = total_dur / len(chunks) if chunks else total_dur
-                          for idx, chunk in enumerate(chunks):
-                              c_start = start_sec + idx * chunk_dur
-                              c_end = start_sec + (idx + 1) * chunk_dur
-                              new_blocks.append(f"{counter}\\n{sec_to_time(c_start)} --> {sec_to_time(c_end)}\\n{chunk}")
-                              counter += 1
-                      except Exception:
-                          new_blocks.append(block)
-                  elif block.strip():
-                      new_blocks.append(block)
-              with open(srt_path, 'w', encoding='utf-8') as f:
-                  f.write("\\n\\n".join(new_blocks) + "\\n")
-          '''
+def _split_srt_dynamic(srt_path):
+    if not os.path.exists(srt_path):
+        return
+    with open(srt_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    blocks = content.strip().split('\\n\\n')
+    new_blocks = []
+    counter = 1
+    def time_to_sec(t_str):
+        try:
+            parts = t_str.replace(',', '.').split(':')
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        except Exception:
+            return 0.0
+    def sec_to_time(sec):
+        h = int(sec // 3600)
+        m = int((sec % 3600) // 60)
+        s = int(sec % 60)
+        ms = int(round((sec - int(sec)) * 1000))
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+    for block in blocks:
+        lines = block.split('\\n')
+        if len(lines) >= 3 and '-->' in lines[1]:
+            try:
+                start_str, end_str = lines[1].split('-->')
+                start_sec = time_to_sec(start_str.strip())
+                end_sec = time_to_sec(end_str.strip())
+                words = " ".join(lines[2:]).strip().split()
+                if not words:
+                    continue
+                chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
+                total_dur = end_sec - start_sec
+                chunk_dur = total_dur / len(chunks) if chunks else total_dur
+                for idx, chunk in enumerate(chunks):
+                    c_start = start_sec + idx * chunk_dur
+                    c_end = start_sec + (idx + 1) * chunk_dur
+                    new_blocks.append(f"{counter}\\n{sec_to_time(c_start)} --> {sec_to_time(c_end)}\\n{chunk}")
+                    counter += 1
+            except Exception:
+                new_blocks.append(block)
+        elif block.strip():
+            new_blocks.append(block)
+    with open(srt_path, 'w', encoding='utf-8') as f:
+        f.write("\\n\\n".join(new_blocks) + "\\n")
+'''
               sub_code += dynamic_sub_code
               
               if 'return subtitle_file' in sub_code:
@@ -224,7 +224,7 @@ jobs:
               with open(sub_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH ULTRA-VERROUILLÉ APPLIQUÉ.')
+          print('PATCH ULTRA-VERROUILLÉ ET ASSAINI APPLIQUÉ.')
           EOF
           python patch_all.py
 
@@ -271,8 +271,6 @@ jobs:
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
             --video-lang "fr" \
             --voice-name "Bodi" \
-            --bgm-type "none" \
-            --bgm-volume 0.0 \
             --subtitle-enabled
 
       - name: Sauvegarder la vidéo finale MP4
