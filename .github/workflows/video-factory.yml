@@ -25,58 +25,59 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-genai openai-whisper gtts
+          pip install google-genai openai-whisper
 
-      - name: Patch Anti-Quota 429 (1 Requete Gemini TTS Bodi + Fallback gTTS)
+      - name: Patch Global Verrouillé (Voix Bodi, Script > 60s, Zero Musique, Sous-titres 2 mots)
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave
 
-          # 1. GENERATION DE SCRIPT LONG (> 60s / 160-200 mots)
+          # 1. GENERATION DE SCRIPT TRÈS LONG (> 80 secondes / 220-250 mots)
           llm_path = 'app/services/llm.py'
-          with open(llm_path, 'r', encoding='utf-8') as f:
-              llm_code = f.read()
+          if os.path.exists(llm_path):
+              with open(llm_path, 'r', encoding='utf-8') as f:
+                  llm_code = f.read()
 
-          target_script = 'def generate_script('
-          new_script = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
-              from google import genai
-              import time
-              api_key = os.environ.get('GEMINI_API_KEY', '').strip()
-              client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
-              prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets, sans titre."
-              
-              res = None
-              for attempt in range(3):
-                  try:
-                      res = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
-                      if res and res.text: break
-                  except Exception:
-                      time.sleep(3)
-              
-              if res and res.text:
-                  return res.text.strip().replace('```', '')
+              target_script = 'def generate_script('
+              new_script = '''def generate_script(video_subject, language="fr", paragraph_number=1, **kwargs):
+                  from google import genai
+                  import time
+                  api_key = os.environ.get('GEMINI_API_KEY', '').strip()
+                  client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
+                  prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, très complet, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument faire au moins 220 à 250 mots pour garantir une durée de lecture orale supérieure à 70 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans balises, sans JSON, sans guillemets, sans titre."
+                  
+                  res = None
+                  for attempt in range(3):
+                      try:
+                          res = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
+                          if res and res.text: break
+                      except Exception:
+                          time.sleep(3)
+                  
+                  if res and res.text:
+                      return res.text.strip().replace('```', '').replace('*', '').replace('#', '')
 
-              return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
+                  return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
 
-          def _disabled_generate_script('''
+              def _disabled_generate_script('''
 
-          if target_script in llm_code:
-              llm_code = llm_code.replace(target_script, new_script, 1)
+              if target_script in llm_code:
+                  llm_code = llm_code.replace(target_script, new_script, 1)
 
-          target_terms = 'def generate_terms('
-          new_terms = '''def generate_terms(video_subject, paragraph_number=1, language="fr", **kwargs):
-              return ["work stress", "mental health", "office relaxation", "meditation"]
+              target_terms = 'def generate_terms('
+              new_terms = '''def generate_terms(video_subject, paragraph_number=1, language="fr", **kwargs):
+                  return ["work stress", "mental health", "office relaxation", "meditation"]
 
-          def _disabled_generate_terms('''
+              def _disabled_generate_terms('''
 
-          if target_terms in llm_code:
-              llm_code = llm_code.replace(target_terms, new_terms, 1)
+              if target_terms in llm_code:
+                  llm_code = llm_code.replace(target_terms, new_terms, 1)
 
-          with open(llm_path, 'w', encoding='utf-8') as f:
-              f.write(llm_code)
+              with open(llm_path, 'w', encoding='utf-8') as f:
+                  f.write(llm_code)
 
 
-          # 2. TTS GEMINI BODI EN 1 SEULE REQUÊTE + FALLBACK gTTS AUTOMATIQUE SUR QUOTA 429
+          # 2. OVERRIDE VOIX GEMINI 3.8 FLASH "Bodi" EN 1 REQUÊTE STREAM
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -86,7 +87,6 @@ jobs:
           def azure_tts_v1(*args, **kwargs):
               from google import genai
               from google.genai import types
-              from gtts import gTTS
               import base64, os, subprocess, wave
 
               text = ""
@@ -107,9 +107,8 @@ jobs:
 
               all_pcm_bytes = bytearray()
 
-              # 1 SEULE requête pour respecter le quota max (10 req/min)
               try:
-                  response = client.models.generate_content(
+                  response_stream = client.models.generate_content_stream(
                       model="gemini-3.8-flash-tts",
                       contents=text,
                       config=types.GenerateContentConfig(
@@ -123,34 +122,33 @@ jobs:
                           )
                       )
                   )
-                  for part in response.candidates[0].content.parts:
-                      if part.inline_data and part.inline_data.data:
-                          all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
+                  for chunk in response_stream:
+                      if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
+                          for part in chunk.candidates[0].content.parts:
+                              if part.inline_data and part.inline_data.data:
+                                  all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
               except Exception as e:
-                  print(f"Gemini TTS Quota/Network Error: {e}")
+                  print(f"Erreur Gemini TTS Stream Bodi : {e}")
+
+              if not all_pcm_bytes:
+                  print("Erreur: Aucune donnée audio reçue.")
+                  return False
 
               os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
+              wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
 
-              # Si Gemini TTS a fonctionné (> 20 KB d'audio)
-              if len(all_pcm_bytes) > 20000:
-                  wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
-                  with wave.open(wav_tmp, 'wb') as wf:
-                      wf.setnchannels(1)
-                      wf.setsampwidth(2)
-                      wf.setframerate(24000)
-                      wf.writeframes(bytes(all_pcm_bytes))
+              with wave.open(wav_tmp, 'wb') as wf:
+                  wf.setnchannels(1)
+                  wf.setsampwidth(2)
+                  wf.setframerate(24000)
+                  wf.writeframes(bytes(all_pcm_bytes))
 
-                  cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
-                  subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
+              subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                  if os.path.exists(wav_tmp):
-                      os.remove(wav_tmp)
-                  return tts_file
+              if os.path.exists(wav_tmp):
+                  os.remove(wav_tmp)
 
-              # FALLBACK IMPARABLE : Génération via gTTS si quota Gemini 429 atteint
-              print("Quota Gemini 429 atteint : Bascule automatique sur gTTS pour garantir la durée complète !")
-              tts = gTTS(text=text, lang='fr')
-              tts.save(tts_file)
               return tts_file
 
           def _disabled_azure_tts_v1(
@@ -165,7 +163,7 @@ jobs:
                   f.write(voice_code)
 
 
-          # 3. POST-TRAITEMENT SOUS-TITRES DYNAMIQUES (MAX 2 MOTS PAR LIGNE)
+          # 3. FORCE DECOUPAGE DES SOUS-TITRES SRT (2 MOTS MAX/LIGNE)
           sub_path = 'app/services/subtitle.py'
           if os.path.exists(sub_path):
               with open(sub_path, 'r', encoding='utf-8') as f:
@@ -226,11 +224,11 @@ jobs:
               with open(sub_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH ANTI-QUOTA APPLIQUE.')
+          print('PATCH ULTRA-VERROUILLÉ APPLIQUÉ.')
           EOF
           python patch_all.py
 
-      - name: Création du config.toml (Zéro Musique + Police Montserrat-Bold)
+      - name: Configuration STRICTE sans musique (config.toml)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -260,11 +258,11 @@ jobs:
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Config.toml générée sans musique.')
+          print('Config.toml stricte générée.')
           EOF
           python make_config.py
 
-      - name: Lancer la génération de la vidéo
+      - name: Lancement CLI avec paramètres stricts
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -273,6 +271,8 @@ jobs:
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
             --video-lang "fr" \
             --voice-name "Bodi" \
+            --bgm-type "none" \
+            --bgm-volume 0.0 \
             --subtitle-enabled
 
       - name: Sauvegarder la vidéo finale MP4
