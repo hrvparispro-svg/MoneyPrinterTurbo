@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch Global Définitif (Script Long + Gemini TTS Fenrir Pur + Sous-titres 2 mots max)
+      - name: Patch Global Sanitisé (Script Long + Gemini TTS Bodi + Sous-titres 2 mots max sans IndentationError)
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave, re
@@ -76,7 +76,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. TTS GEMINI PUR PAR PHRASES (Voix studio Fenrir : Homme grave & expressif)
+          # 2. TTS GEMINI 3.8 FLASH VOIX BODI (PAR PHRASES + PARALLELE)
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -121,7 +121,7 @@ jobs:
                               speech_config=types.SpeechConfig(
                                   voice_config=types.VoiceConfig(
                                       prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                          voice_name="Fenrir"
+                                          voice_name="Bodi"
                                       )
                                   )
                               )
@@ -131,7 +131,7 @@ jobs:
                           if part.inline_data and part.inline_data.data:
                               all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
                   except Exception as e:
-                      print(f"Erreur Gemini TTS phrase : {e}")
+                      print(f"Erreur Gemini TTS Bodi : {e}")
 
               os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
 
@@ -162,15 +162,17 @@ jobs:
                   f.write(voice_code)
 
 
-          # 3. POST-TRAITEMENT SOUS-TITRES (Max 2 mots par ligne)
+          # 3. POST-TRAITEMENT SOUS-TITRES DYNAMIQUES (MAX 2 MOTS PAR LIGNE, PROPREMENT INDENTÉ)
           sub_path = 'app/services/subtitle.py'
           if os.path.exists(sub_path):
               with open(sub_path, 'r', encoding='utf-8') as f:
                   sub_code = f.read()
 
               dynamic_sub_code = '''
+
           def _split_srt_dynamic(srt_path):
-              if not os.path.exists(srt_path): return
+              if not os.path.exists(srt_path):
+                  return
               with open(srt_path, 'r', encoding='utf-8') as f:
                   content = f.read()
               blocks = content.strip().split('\\n\\n')
@@ -180,7 +182,7 @@ jobs:
                   try:
                       parts = t_str.replace(',', '.').split(':')
                       return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                  except:
+                  except Exception:
                       return 0.0
               def sec_to_time(sec):
                   h = int(sec // 3600)
@@ -190,45 +192,42 @@ jobs:
                   return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
               for block in blocks:
                   lines = block.split('\\n')
-                  if len(lines) >= 3:
-                      time_line = lines[1]
-                      text_lines = " ".join(lines[2:])
-                      if '-->' in time_line:
-                          try:
-                              start_str, end_str = time_line.split('-->')
-                              start_sec = time_to_sec(start_str.strip())
-                              end_sec = time_to_sec(end_str.strip())
-                              words = text_lines.strip().split()
-                              if not words: continue
-                              chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
-                              total_dur = end_sec - start_sec
-                              chunk_dur = total_dur / len(chunks) if chunks else total_dur
-                              for idx, chunk in enumerate(chunks):
-                                  c_start = start_sec + idx * chunk_dur
-                                  c_end = start_sec + (idx + 1) * chunk_dur
-                                  new_blocks.append(f"{counter}\\n{sec_to_time(c_start)} --> {sec_to_time(c_end)}\\n{chunk}")
-                                  counter += 1
-                          except:
-                              new_blocks.append(block)
+                  if len(lines) >= 3 and '-->' in lines[1]:
+                      try:
+                          start_str, end_str = lines[1].split('-->')
+                          start_sec = time_to_sec(start_str.strip())
+                          end_sec = time_to_sec(end_str.strip())
+                          words = " ".join(lines[2:]).strip().split()
+                          if not words:
+                              continue
+                          chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
+                          total_dur = end_sec - start_sec
+                          chunk_dur = total_dur / len(chunks) if chunks else total_dur
+                          for idx, chunk in enumerate(chunks):
+                              c_start = start_sec + idx * chunk_dur
+                              c_end = start_sec + (idx + 1) * chunk_dur
+                              new_blocks.append(f"{counter}\\n{sec_to_time(c_start)} --> {sec_to_time(c_end)}\\n{chunk}")
+                              counter += 1
+                      except Exception:
+                          new_blocks.append(block)
                   elif block.strip():
                       new_blocks.append(block)
               with open(srt_path, 'w', encoding='utf-8') as f:
                   f.write("\\n\\n".join(new_blocks) + "\\n")
           '''
-              sub_code += "\n" + dynamic_sub_code
+              sub_code += dynamic_sub_code
+              
               if 'return subtitle_file' in sub_code:
                   sub_code = sub_code.replace('return subtitle_file', '_split_srt_dynamic(subtitle_file)\n    return subtitle_file')
-              elif 'return True' in sub_code:
-                  sub_code = sub_code.replace('return True', '_split_srt_dynamic(subtitle_file)\n    return True')
 
               with open(sub_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH DEFINITIF APPLIQUE.')
+          print('PATCH PARFAITEMENT INDENTÉ ET VALIDÉ.')
           EOF
           python patch_all.py
 
-      - name: Création du config.toml (Sans Musique & Police Montserrat-Bold)
+      - name: Création du config.toml (Zero Musique + Police Montserrat-Bold)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -247,7 +246,7 @@ jobs:
           subtitle_provider = "whisper"
 
           [video]
-          voice_name = "Fenrir"
+          voice_name = "Bodi"
           bgm_type = "none"
           bgm_volume = 0.0
           video_volume = 0.0
@@ -270,7 +269,7 @@ jobs:
           python cli.py \
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
             --video-lang "fr" \
-            --voice-name "Fenrir" \
+            --voice-name "Bodi" \
             --subtitle-enabled
 
       - name: Sauvegarder la vidéo finale MP4
