@@ -21,18 +21,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fonts-montserrat
 
-      - name: Installation des dépendances Python
+      - name: Installation des dépendances Python (gTTS inclus pour fallback)
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-genai openai-whisper
+          pip install google-genai openai-whisper gtts
 
-      - name: Patch TTS par découpage en phrases + LLM Script long
+      - name: Patch Global Ultra-Pro (Script Long + Gemini TTS Bodi par phrases + Fallback + Subtitles)
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave, re
 
-          # 1. Script LLM (160-200 mots)
+          # 1. GENERATION DE SCRIPT LONG (> 60s / 160-200 mots)
           llm_path = 'app/services/llm.py'
           with open(llm_path, 'r', encoding='utf-8') as f:
               llm_code = f.read()
@@ -44,6 +44,7 @@ jobs:
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
               prompt = f"Tu es un expert TikTok. Rédige un script de voix off détaillé, structuré et captivant en {language} sur le sujet : '{video_subject}'. Le texte doit absolument contenir entre 160 et 200 mots pour garantir une durée de lecture supérieure à 60 secondes. Écris UNIQUEMENT le texte brut de la voix off, sans aucune balise, sans JSON, sans guillemets, sans titre."
+              
               res = None
               for attempt in range(3):
                   try:
@@ -51,8 +52,10 @@ jobs:
                       if res and res.text: break
                   except Exception:
                       time.sleep(3)
+              
               if res and res.text:
                   return res.text.strip().replace('```', '')
+
               return "Le stress au travail peut lourdement impacter votre santé mentale et votre équilibre de vie. Pour vous protéger efficacement au quotidien, il est primordial d'instaurer des limites strictes entre vie professionnelle et vie personnelle. Prenez l'habitude de pratiquer la respiration profonde, de faire des pauses régulières sans écran, et d'exprimer vos ressentis. Votre bien-être mental est une priorité absolue. Retrouvez tous nos conseils d'experts et un accompagnement sur mesure pour préserver votre santé au quotidien sur hrv-paris.com."
 
           def _disabled_generate_script('''
@@ -72,7 +75,8 @@ jobs:
           with open(llm_path, 'w', encoding='utf-8') as f:
               f.write(llm_code)
 
-          # 2. TTS Gemini avec découpage par phrases
+
+          # 2. TTS ULTRA-ROBUSTE PAR CHUNKING + CONCATENATION DE BITS PCM
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -82,6 +86,7 @@ jobs:
           def azure_tts_v1(*args, **kwargs):
               from google import genai
               from google.genai import types
+              from gtts import gTTS
               import base64, os, subprocess, wave, re
 
               text = ""
@@ -100,12 +105,13 @@ jobs:
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
 
-              # Découpage du texte par phrases/segments (ponctuation)
-              sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+              # Découpage par phrases pour contourner le bug de l'API sur les longs textes
+              raw_sentences = re.split(r'(?<=[.!?])\s+', text)
+              sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 2]
               if not sentences:
                   sentences = [text]
 
-              all_raw_data = bytearray()
+              all_pcm_bytes = bytearray()
 
               for sentence in sentences:
                   try:
@@ -125,28 +131,33 @@ jobs:
                       )
                       for part in response.candidates[0].content.parts:
                           if part.inline_data and part.inline_data.data:
-                              all_raw_data.extend(base64.b64decode(part.inline_data.data))
+                              all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
                   except Exception as e:
-                      print(f"Error TTS sentence '{sentence[:20]}...': {e}")
-
-              if not all_raw_data:
-                  return False
+                      print(f"Erreur Gemini TTS phrase : {e}")
 
               os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
-              wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
 
-              with wave.open(wav_tmp, 'wb') as wf:
-                  wf.setnchannels(1)
-                  wf.setsampwidth(2)
-                  wf.setframerate(24000)
-                  wf.writeframes(bytes(all_raw_data))
+              # Si Gemini TTS a fonctionné et qu'on a un vrai fichier PCM (> 50 Ko)
+              if len(all_pcm_bytes) > 50000:
+                  wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
+                  with wave.open(wav_tmp, 'wb') as wf:
+                      wf.setnchannels(1)
+                      wf.setsampwidth(2)
+                      wf.setframerate(24000)
+                      wf.writeframes(bytes(all_pcm_bytes))
 
-              cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
-              subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                  cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
+                  subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-              if os.path.exists(wav_tmp):
-                  os.remove(wav_tmp)
+                  if os.path.exists(wav_tmp):
+                      os.remove(wav_tmp)
+                  print(f"Succès Gemini TTS Bodi. Taille PCM: {len(all_pcm_bytes)} octets.")
+                  return tts_file
 
+              # FALLBACK SECURISE : Si Gemini a échoué à générer l'audio complet, bascule automatique gTTS
+              print("Avertissement: Gemini TTS trop court, bascule sur le moteur de secours gTTS pour garantir la durée.")
+              tts = gTTS(text=text, lang='fr')
+              tts.save(tts_file)
               return tts_file
 
           def _disabled_azure_tts_v1(
@@ -160,11 +171,11 @@ jobs:
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          print('PATCH TTS SEGMENTE APPLIQUE.')
+          print('PATCH PARALLÈLE ET SÉCURISÉ APPLIQUÉ.')
           EOF
           python patch_all.py
 
-      - name: Création du fichier config.toml
+      - name: Création du fichier config.toml (Montserrat-Bold)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -192,6 +203,7 @@ jobs:
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
+          print('Config.toml générée.')
           EOF
           python make_config.py
 
@@ -205,6 +217,16 @@ jobs:
             --video-lang "fr" \
             --voice-name "Bodi" \
             --subtitle-enabled
+
+      - name: Vérification finale de la durée vidéo
+        if: always()
+        run: |
+          echo "=== VÉRIFICATION FINALE DE LA DURÉE DE LA VIDÉO ==="
+          for f in $(find ./storage -name "final-*.mp4"); do
+            echo "Vidéo générée: $f"
+            ls -lh "$f"
+            ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$f"
+          done
 
       - name: Sauvegarder la vidéo finale MP4
         uses: actions/upload-artifact@v4
