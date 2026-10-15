@@ -27,7 +27,7 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Patch Global Sanitisé (Script Long + Gemini TTS Bodi + Sous-titres 2 mots max sans IndentationError)
+      - name: Patch Global Définitif (Script Long + Gemini TTS Bodi + Zéro Musique + Sous-titres 2 mots max)
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave, re
@@ -76,7 +76,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. TTS GEMINI 3.8 FLASH VOIX BODI (PAR PHRASES + PARALLELE)
+          # 2. TTS GEMINI 3.8 FLASH AVEC LA VOIX OFFICIELLE "Bodi" ET CHUNKING
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -162,7 +162,7 @@ jobs:
                   f.write(voice_code)
 
 
-          # 3. POST-TRAITEMENT SOUS-TITRES DYNAMIQUES (MAX 2 MOTS PAR LIGNE, PROPREMENT INDENTÉ)
+          # 3. POST-TRAITEMENT SOUS-TITRES DYNAMIQUES (MAX 2 MOTS PAR LIGNE)
           sub_path = 'app/services/subtitle.py'
           if os.path.exists(sub_path):
               with open(sub_path, 'r', encoding='utf-8') as f:
@@ -223,11 +223,11 @@ jobs:
               with open(sub_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH PARFAITEMENT INDENTÉ ET VALIDÉ.')
+          print('PATCH DEFINITIF BODI APPLIQUE.')
           EOF
           python patch_all.py
 
-      - name: Création du config.toml (Zero Musique + Police Montserrat-Bold)
+      - name: Création du config.toml (Zéro Musique + Voix Bodi + Police Montserrat-Bold)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
