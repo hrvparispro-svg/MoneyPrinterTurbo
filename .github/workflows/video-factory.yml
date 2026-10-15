@@ -27,12 +27,12 @@ jobs:
           pip install -r requirements.txt
           pip install google-genai openai-whisper
 
-      - name: Création du script de patch
+      - name: Patch Global Robust Base64 + Gemini TTS Bodi + Subtitles 2 mots max
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave
 
-          # 1. GENERATION DU SCRIPT LONG (> 60s / 200-250 mots)
+          # 1. GENERATION DE SCRIPT LONG (> 60s / 200-250 mots)
           llm_path = 'app/services/llm.py'
           if os.path.exists(llm_path):
               with open(llm_path, 'r', encoding='utf-8') as f:
@@ -77,7 +77,7 @@ jobs:
                   f.write(llm_code)
 
 
-          # 2. OVERRIDE VOIX GEMINI 3.8 FLASH "Bodi" EN 1 REQUÊTE STREAM
+          # 2. OVERRIDE VOIX GEMINI 3.8 FLASH "Bodi" AVEC DECODAGE BASE64 SÉCURISÉ
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -107,6 +107,14 @@ jobs:
 
               all_pcm_bytes = bytearray()
 
+              def safe_b64decode(data_str):
+                  if isinstance(data_str, bytes):
+                      return data_str
+                  missing_padding = len(data_str) % 4
+                  if missing_padding:
+                      data_str += '=' * (4 - missing_padding)
+                  return base64.b64decode(data_str)
+
               try:
                   response_stream = client.models.generate_content_stream(
                       model="gemini-3.8-flash-tts",
@@ -126,7 +134,8 @@ jobs:
                       if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
                           for part in chunk.candidates[0].content.parts:
                               if part.inline_data and part.inline_data.data:
-                                  all_pcm_bytes.extend(base64.b64decode(part.inline_data.data))
+                                  raw_data = part.inline_data.data
+                                  all_pcm_bytes.extend(safe_b64decode(raw_data))
               except Exception as e:
                   print(f"Erreur Gemini TTS Stream Bodi : {e}")
 
@@ -224,7 +233,7 @@ jobs:
               with open(sub_path, 'w', encoding='utf-8') as f:
                   f.write(sub_code)
 
-          print('PATCH ULTRA-VERROUILLÉ ET ASSAINI APPLIQUÉ.')
+          print('PATCH BASE64 SECURISE APPLIQUE.')
           EOF
           python patch_all.py
 
