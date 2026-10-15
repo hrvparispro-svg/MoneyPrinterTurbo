@@ -21,13 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick fonts-montserrat
 
-      - name: Installation des dépendances Python (gTTS inclus pour fallback)
+      - name: Installation des dépendances Python
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install google-genai openai-whisper gtts
+          pip install google-genai openai-whisper
 
-      - name: Patch Global Ultra-Pro (Script Long + Gemini TTS Bodi par phrases + Fallback + Subtitles)
+      - name: Patch Global Définitif (Script Long + Gemini TTS Fenrir Pur + Sous-titres 2 mots max)
         run: |
           cat << 'EOF' > patch_all.py
           import os, subprocess, base64, wave, re
@@ -76,7 +76,7 @@ jobs:
               f.write(llm_code)
 
 
-          # 2. TTS ULTRA-ROBUSTE PAR CHUNKING + CONCATENATION DE BITS PCM
+          # 2. TTS GEMINI PUR PAR PHRASES (Voix studio Fenrir : Homme grave & expressif)
           voice_path = 'app/services/voice.py'
           if os.path.exists(voice_path):
               with open(voice_path, 'r', encoding='utf-8') as f:
@@ -86,7 +86,6 @@ jobs:
           def azure_tts_v1(*args, **kwargs):
               from google import genai
               from google.genai import types
-              from gtts import gTTS
               import base64, os, subprocess, wave, re
 
               text = ""
@@ -105,7 +104,6 @@ jobs:
               api_key = os.environ.get('GEMINI_API_KEY', '').strip()
               client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
 
-              # Découpage par phrases pour contourner le bug de l'API sur les longs textes
               raw_sentences = re.split(r'(?<=[.!?])\s+', text)
               sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 2]
               if not sentences:
@@ -123,7 +121,7 @@ jobs:
                               speech_config=types.SpeechConfig(
                                   voice_config=types.VoiceConfig(
                                       prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                          voice_name="Bodi"
+                                          voice_name="Fenrir"
                                       )
                                   )
                               )
@@ -137,27 +135,19 @@ jobs:
 
               os.makedirs(os.path.dirname(os.path.abspath(tts_file)), exist_ok=True)
 
-              # Si Gemini TTS a fonctionné et qu'on a un vrai fichier PCM (> 50 Ko)
-              if len(all_pcm_bytes) > 50000:
-                  wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
-                  with wave.open(wav_tmp, 'wb') as wf:
-                      wf.setnchannels(1)
-                      wf.setsampwidth(2)
-                      wf.setframerate(24000)
-                      wf.writeframes(bytes(all_pcm_bytes))
+              wav_tmp = tts_file.replace('.mp3', '_tmp.wav')
+              with wave.open(wav_tmp, 'wb') as wf:
+                  wf.setnchannels(1)
+                  wf.setsampwidth(2)
+                  wf.setframerate(24000)
+                  wf.writeframes(bytes(all_pcm_bytes))
 
-                  cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
-                  subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              cmd = ["ffmpeg", "-y", "-i", wav_tmp, "-c:a", "libmp3lame", "-b:a", "192k", tts_file]
+              subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-                  if os.path.exists(wav_tmp):
-                      os.remove(wav_tmp)
-                  print(f"Succès Gemini TTS Bodi. Taille PCM: {len(all_pcm_bytes)} octets.")
-                  return tts_file
+              if os.path.exists(wav_tmp):
+                  os.remove(wav_tmp)
 
-              # FALLBACK SECURISE : Si Gemini a échoué à générer l'audio complet, bascule automatique gTTS
-              print("Avertissement: Gemini TTS trop court, bascule sur le moteur de secours gTTS pour garantir la durée.")
-              tts = gTTS(text=text, lang='fr')
-              tts.save(tts_file)
               return tts_file
 
           def _disabled_azure_tts_v1(
@@ -171,11 +161,74 @@ jobs:
               with open(voice_path, 'w', encoding='utf-8') as f:
                   f.write(voice_code)
 
-          print('PATCH PARALLÈLE ET SÉCURISÉ APPLIQUÉ.')
+
+          # 3. POST-TRAITEMENT SOUS-TITRES (Max 2 mots par ligne)
+          sub_path = 'app/services/subtitle.py'
+          if os.path.exists(sub_path):
+              with open(sub_path, 'r', encoding='utf-8') as f:
+                  sub_code = f.read()
+
+              dynamic_sub_code = '''
+          def _split_srt_dynamic(srt_path):
+              if not os.path.exists(srt_path): return
+              with open(srt_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              blocks = content.strip().split('\\n\\n')
+              new_blocks = []
+              counter = 1
+              def time_to_sec(t_str):
+                  try:
+                      parts = t_str.replace(',', '.').split(':')
+                      return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                  except:
+                      return 0.0
+              def sec_to_time(sec):
+                  h = int(sec // 3600)
+                  m = int((sec % 3600) // 60)
+                  s = int(sec % 60)
+                  ms = int(round((sec - int(sec)) * 1000))
+                  return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+              for block in blocks:
+                  lines = block.split('\\n')
+                  if len(lines) >= 3:
+                      time_line = lines[1]
+                      text_lines = " ".join(lines[2:])
+                      if '-->' in time_line:
+                          try:
+                              start_str, end_str = time_line.split('-->')
+                              start_sec = time_to_sec(start_str.strip())
+                              end_sec = time_to_sec(end_str.strip())
+                              words = text_lines.strip().split()
+                              if not words: continue
+                              chunks = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
+                              total_dur = end_sec - start_sec
+                              chunk_dur = total_dur / len(chunks) if chunks else total_dur
+                              for idx, chunk in enumerate(chunks):
+                                  c_start = start_sec + idx * chunk_dur
+                                  c_end = start_sec + (idx + 1) * chunk_dur
+                                  new_blocks.append(f"{counter}\\n{sec_to_time(c_start)} --> {sec_to_time(c_end)}\\n{chunk}")
+                                  counter += 1
+                          except:
+                              new_blocks.append(block)
+                  elif block.strip():
+                      new_blocks.append(block)
+              with open(srt_path, 'w', encoding='utf-8') as f:
+                  f.write("\\n\\n".join(new_blocks) + "\\n")
+          '''
+              sub_code += "\n" + dynamic_sub_code
+              if 'return subtitle_file' in sub_code:
+                  sub_code = sub_code.replace('return subtitle_file', '_split_srt_dynamic(subtitle_file)\n    return subtitle_file')
+              elif 'return True' in sub_code:
+                  sub_code = sub_code.replace('return True', '_split_srt_dynamic(subtitle_file)\n    return True')
+
+              with open(sub_path, 'w', encoding='utf-8') as f:
+                  f.write(sub_code)
+
+          print('PATCH DEFINITIF APPLIQUE.')
           EOF
           python patch_all.py
 
-      - name: Création du fichier config.toml (Montserrat-Bold)
+      - name: Création du config.toml (Sans Musique & Police Montserrat-Bold)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -194,7 +247,9 @@ jobs:
           subtitle_provider = "whisper"
 
           [video]
-          voice_name = "Bodi"
+          voice_name = "Fenrir"
+          bgm_type = "none"
+          bgm_volume = 0.0
           video_volume = 0.0
           subtitle_enabled = true
           font_name = "Montserrat-Bold"
@@ -203,7 +258,7 @@ jobs:
           '''
           with open('config.toml', 'w', encoding='utf-8') as f:
               f.write(config)
-          print('Config.toml générée.')
+          print('Config.toml générée sans musique.')
           EOF
           python make_config.py
 
@@ -215,18 +270,8 @@ jobs:
           python cli.py \
             --video-subject "Comment protéger sa santé mentale face au stress au travail - hrv-paris.com" \
             --video-lang "fr" \
-            --voice-name "Bodi" \
+            --voice-name "Fenrir" \
             --subtitle-enabled
-
-      - name: Vérification finale de la durée vidéo
-        if: always()
-        run: |
-          echo "=== VÉRIFICATION FINALE DE LA DURÉE DE LA VIDÉO ==="
-          for f in $(find ./storage -name "final-*.mp4"); do
-            echo "Vidéo générée: $f"
-            ls -lh "$f"
-            ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$f"
-          done
 
       - name: Sauvegarder la vidéo finale MP4
         uses: actions/upload-artifact@v4
